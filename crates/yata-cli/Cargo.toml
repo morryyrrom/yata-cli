@@ -1,0 +1,22 @@
+[package]
+name = "yata-cli"
+description = "Command-line interface for Yata Cloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "yata"
+path = "src/main.rs"
+
+[dependencies]
+yata-core.workspace = true
+yata-provider-aws.workspace = true
+yata-engine.workspace = true
+yata-report.workspace = true
+
+[lints]
+workspace = true
