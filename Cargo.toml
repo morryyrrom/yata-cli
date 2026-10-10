@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.94.1"
+repository = "https://github.com/morryyrrom/yata-cli"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[workspace.dependencies]
+# Internal crates
+yata-core = { path = "crates/yata-core", version = "0.1.0" }
+yata-provider-aws = { path = "crates/yata-provider-aws", version = "0.1.0" }
+yata-engine = { path = "crates/yata-engine", version = "0.1.0" }
+yata-report = { path = "crates/yata-report", version = "0.1.0" }
+
+# Runtime dependencies
+clap = { version = "4.6.7", features = ["derive"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "signal"] }
+aws-config = "1.12.0"
+aws-sdk-sts = "1.119.0"
+aws-sdk-ec2 = "1.267.0"
+aws-smithy-runtime-api = "1.19.0"
+regorus = "0.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
+comfy-table = "8.0.1"
+
+# Development dependencies
+aws-smithy-mocks = "0.3.0"
+assert_cmd = "2.2.2"
