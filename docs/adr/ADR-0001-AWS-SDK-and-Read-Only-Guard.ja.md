@@ -3,7 +3,7 @@
 > This Japanese version is the authoritative source. The English version (`ADR-0001-AWS-SDK-and-Read-Only-Guard.md`) has not been written yet.
 
 - ステータス: 承認
-- 関連: [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md)
+- 関連: [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md)、[ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md)
 
 ## 背景
 
@@ -30,7 +30,9 @@ Yata Cloud は利用者の AWS アカウントに接続して設定を読み取�
 - 判定は拒否リスト → 例外リスト → 接頭辞の順で、拒否リストを優先する
 - クライアントは `yata-provider-aws` の生成用マクロ(またはヘルパー)でだけ作る。直接の生成はテストで検出する
 - 例外リストと拒否リストは `yata-provider-aws/src/support/` に理由とともに書く。初期状態の例外リストは空。どちらも中央の列挙だが追加の頻度が低い共有箇所とし、変更はメンテナーの判断を経た単独の PR で行う
+  - 例外リストには、[ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) で IAM の `GenerateCredentialReport` を加えた。現在の内容は [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md) を参照
 - 各コレクターは必要な IAM 権限を宣言し、テストでその形(`<service>:(Describe|List|Get)...`)と、拒否リストの操作(併記した IAM アクション名で比べる)を含まないことを確かめる。コードレビューでも確かめる
+  - 例外リストにある操作の IAM アクション名も、この形の検査で許す([ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md))
 
 ### 認証情報の解決で SDK が内部で呼ぶ操作
 
@@ -61,7 +63,7 @@ Yata Cloud は利用者の AWS アカウントに接続して設定を読み取�
 ## 結果
 
 - 書き込み系の操作の呼び出しは、送信前にエラーになる。エラーは収集の失敗として記録され、利用者の環境は変更されない
-- 操作名が Describe / List / Get で始まらない読み取りの操作(例: IAM の認証情報レポートの生成 `GenerateCredentialReport`)は、例外リストに載せない限り使えない。扱いは [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md) の未決事項とする
+- 操作名が Describe / List / Get で始まらない読み取りの操作(例: IAM の認証情報レポートの生成 `GenerateCredentialReport`)は、例外リストに載せない限り使えない。`GenerateCredentialReport` は [ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) で例外リストに加えた
 - ガードはインターセプターから操作名(SDK が設定に入れる操作のメタデータ)を読む前提で設計している。公開 API でこれが実現できない場合は、クライアントの生成をラップする型で呼べる操作を限定する方法に切り替える(AWS プロバイダを実装する Issue で確認する)
 - AWS SDK for Rust の最低対応 Rust バージョンに、Yata Cloud の最低対応バージョンを合わせる必要がある
 

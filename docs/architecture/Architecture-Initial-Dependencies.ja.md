@@ -19,7 +19,13 @@
 | `aws-config` | `yata-provider-aws` | 認証情報・リージョンの解決 | AWS 公式。既定の認証情報プロバイダチェーンを使える | Apache-2.0 |
 | `aws-sdk-sts` | `yata-provider-aws` | `GetCallerIdentity` | AWS 公式 | Apache-2.0 |
 | `aws-sdk-ec2` | `yata-provider-aws` | `DescribeRegions`(CIS のチェックでも EC2 の API を使う) | AWS 公式 | Apache-2.0 |
-| `aws-sdk-<service>` | `yata-provider-aws` | 各サービスのリソースの収集 | AWS 公式。追加するサービスは最初のルール群を決める Issue で決める | Apache-2.0 |
+| `aws-sdk-iam` | `yata-provider-aws` | IAM の種別(アカウントの概要、パスワードポリシー、ユーザー、ポリシー)の収集と認証情報レポート | AWS 公式 | Apache-2.0 |
+| `aws-sdk-s3` | `yata-provider-aws` | S3 のバケットの収集 | AWS 公式 | Apache-2.0 |
+| `aws-sdk-s3control` | `yata-provider-aws` | アカウント単位の S3 のブロックパブリックアクセスの収集 | AWS 公式。アカウント単位の設定は S3 Control の API にしか無い | Apache-2.0 |
+| `aws-sdk-cloudtrail` | `yata-provider-aws` | CloudTrail の証跡の収集 | AWS 公式 | Apache-2.0 |
+| `aws-sdk-cloudwatchlogs` | `yata-provider-aws` | CloudWatch Logs のメトリクスフィルターの収集 | AWS 公式 | Apache-2.0 |
+| `aws-sdk-cloudwatch` | `yata-provider-aws` | CloudWatch のアラームの収集 | AWS 公式 | Apache-2.0 |
+| `aws-sdk-sns` | `yata-provider-aws` | SNS のトピックと購読の収集 | AWS 公式 | Apache-2.0 |
 | `aws-smithy-runtime-api` | `yata-provider-aws` | 読み取り専用ガード(インターセプター)の実装 | AWS SDK の一部。操作のメタデータとインターセプターの型を提供する | Apache-2.0 |
 | `regorus` | `yata-engine` | Rego の評価 | 純 Rust の Rego 実装(Microsoft)。選定理由は [ADR: ポリシーエンジン](../adr/ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md) | MIT AND Apache-2.0 AND BSD-3-Clause |
 | `serde`(`derive`) | `yata-core`、`yata-report` ほか | シリアライズ | 事実上の標準 | MIT OR Apache-2.0 |
@@ -30,13 +36,18 @@
 | `tracing-subscriber`(`fmt`、`env-filter`) | `yata-cli` | ログの出力、`YATA_LOG` によるフィルタ | `tracing` の標準の出力先 | MIT |
 | `comfy-table` | `yata-report` | table 形式の整形 | 列幅の自動調整、端末幅への対応、色付けができる | MIT |
 
+AWS SDK のサービスのクレートは、[最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) で使うものを先にまとめて追加します。追加の時期と PR の分け方は [ワークスペース構成](Architecture-Workspace-Layout.ja.md) の「共有ファイル」を参照してください。
+
+- バージョンは追加する時点の最新の安定版とし、既にある `aws-config`・`aws-sdk-sts`・`aws-sdk-ec2` と同じ時期のリリースにそろえる
+- 既定の機能(`default-features`)を外すかどうかは、依存を追加する PR でビルド時間と合わせて判断する
+
 `regorus` のライセンスは、crates.io の登録では `MIT AND Apache-2.0 AND BSD-3-Clause`(3 つすべてに従う)です。いずれも寛容なライセンスで、著作権表示とライセンス文の同梱を守れば Yata Cloud の配布に使えます。
 
 ## 開発時の依存(dev-dependencies)
 
 | クレート | 使うクレート | 用途 | 採用理由 | ライセンス |
 | --- | --- | --- | --- | --- |
-| `aws-smithy-mocks` | `yata-provider-aws` | SDK の応答のモック | AWS のドキュメントで推奨されているテストの方法。SDK のサービスのクレートの `test-util` 機能とあわせて使う | Apache-2.0 |
+| `aws-smithy-mocks` | `yata-provider-aws` | SDK の応答のモック、リクエストの照合 | AWS のドキュメントで推奨されているテストの方法。SDK のサービスのクレートの `test-util` 機能とあわせて使う(`yata-provider-aws` の `[dev-dependencies]` で、使う SDK のサービスのクレートすべての `test-util` を有効にする) | Apache-2.0 |
 | `assert_cmd` | `yata-cli` | バイナリの統合テスト | 子プロセスの実行、終了コード・出力の確認が簡単に書ける | MIT OR Apache-2.0 |
 | `tempfile` | 各クレート | 一時ディレクトリ・ファイル | テストを worktree 間で独立させるため | MIT OR Apache-2.0 |
 
@@ -60,6 +71,7 @@
 
 | 項目 | 内容 | 決める時期 |
 | --- | --- | --- |
+| Blob の base64 の変換に使うクレート | 構成情報の Blob の項目を base64 の文字列にする([リソースモデル](Architecture-Resource-Model.ja.md) の「項目名と値の規則」)。候補は `aws-smithy-types` の `base64` モジュール(Apache-2.0。AWS SDK が既に依存しているため、依存の木に新しいクレートが増えない。`yata-provider-aws` の直接の依存として書く必要がある)と `base64`(MIT OR Apache-2.0)。採用する場合は追加の了承が必要。どちらでも、ルートの `[workspace.dependencies]`・`crates/yata-provider-aws/Cargo.toml`・`Cargo.lock` の変更になるため、コレクターの PR とは別の、依存を追加する単独の PR で行う | Blob の項目を base64 で入れる最初のコレクターを実装する Issue |
 | 日時の整形に使うクレート | RFC 3339 の日時の生成。候補は `time`(MIT OR Apache-2.0)、`jiff`(Unlicense OR MIT)、`chrono`(MIT OR Apache-2.0。regorus の `time` 機能が依存しているため、追加のビルドが少ない) | 出力を実装する Issue |
 | 依存クレートのライセンス表示 | バイナリの配布物に同梱する著作権表示の作り方(`cargo-about` などのツール) | 最初のリリースを計画する Issue |
 | 依存クレートの検査 | `cargo-deny` によるライセンス・脆弱性の CI での検査 | 骨組みの Issue または別 Issue |
@@ -72,6 +84,9 @@
 - CEL の Rust 実装(`cel`): <https://github.com/cel-rust/cel-rust>
 - AWS SDK for Rust: <https://docs.aws.amazon.com/sdk-for-rust/latest/dg/welcome.html>
 - `aws-smithy-mocks`: <https://docs.aws.amazon.com/sdk-for-rust/latest/dg/testing-smithy-mocks.html>
+- AWS SDK for Rust のクレート(ライセンス): <https://crates.io/crates/aws-sdk-cloudwatchlogs>、<https://crates.io/crates/aws-sdk-s3control>、リポジトリ <https://github.com/awslabs/aws-sdk-rust>
+- `aws-smithy-types` の `base64` モジュール: <https://docs.rs/aws-smithy-types/latest/aws_smithy_types/base64/index.html>
+- `base64`: <https://crates.io/crates/base64>
 - `comfy-table`: <https://github.com/nukesor/comfy-table>
 - `serde-sarif`: <https://github.com/psastras/sarif-rs>
 - `directories`: <https://crates.io/crates/directories>、`dirs`: <https://crates.io/crates/dirs>

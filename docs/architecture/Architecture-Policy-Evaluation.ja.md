@@ -113,12 +113,18 @@ fail contains finding if {
 | `remediation` | 必須 | 修正手順(英語) |
 | `target_type` | 必須 | 検出の対象にするリソース種別(文字列 1 つ)。`fail` の `resource_id` はこの種別のリソースでなければならない。結果(`pass` / `fail`)はこの種別のリソースごとに作る |
 | `related_types` | 任意 | 判定のために参照するだけのリソース種別の配列(例: CloudTrail の証跡を判定するために参照する S3 のバケット)。`target_type` を含めない。当面は `target_type` と同じプロバイダの種別だけを書ける(ほかのプロバイダの種別があればメタデータの誤り) |
-| `references` | 必須 | 対応する基準の配列(空でもよい)。各要素は `standard`、`version`、`control` を持つ。URL を足す場合は `url` |
+| `references` | 必須 | 対応する基準の配列(空でもよい)。各要素は `standard`、`version`、`control` を持つ。URL を足す場合は `url`(下の「基準の参照」) |
 | `tags` | 任意 | 文字列の配列。絞り込みに使う |
 
 - メタデータは文字列・配列・オブジェクトの定数だけで書き、入力に依存させません(入力なしで評価して取り出すため)
 - 表に無いキーは、エラーにせず無視します(下の「互換性の規則」)
 - ルールのプロバイダは `target_type` の最初の部分(`aws` など)で決まります。パスからは決めません
+
+### 基準の参照
+
+- 最初のルール群が対象とする基準は **CIS Amazon Web Services Foundations Benchmark v7.1.0** とする。対象のコントロールと選んだ理由は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) を参照
+- CIS のコントロールに対応するルールは、`references` に `{"standard": "cis-aws-foundations", "version": "7.1.0", "control": "<番号>"}` を書く
+- コントロールの番号・題名は、v7.1.0 の本文で確かめてからルールを公開する([最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の未決事項「CIS v7.1.0 の本文の確認」)
 
 ### fail の規約
 
@@ -128,16 +134,19 @@ fail contains finding if {
 | キー | 必須 | 内容 |
 | --- | --- | --- |
 | `resource_id` | 必須 | 不合格のリソースの `id`。`target_type` のリソースであること |
+| `resource_region` | 任意 | 不合格のリソースの `region`(文字列)。指定すると、その `id` とリージョンのリソースだけの検出になる。省略すると、その `id` のすべてのリソース(同じ `id` が複数のリージョンに現れる場合はそのすべて)の検出になる |
 | `message` | 必須 | 人が読む説明(英語)。どこが、なぜ不合格かを書く |
 | `path` | 任意 | 不合格の箇所。リソースのオブジェクトを起点とする JSON Pointer(RFC 6901)の文字列(例: `/configuration/GetPublicAccessBlock/PublicAccessBlockConfiguration/BlockPublicAcls`)。特定の項目に結びつく不合格では書く |
 | `actual` | 任意 | その箇所の実際の値(任意の JSON の値)。`path` を書いたときは書く |
 | `expected` | 任意 | 期待する値、または期待の説明(任意の JSON の値) |
 
 - 1 つのリソースに不合格の箇所が複数あれば、箇所ごとに要素を返す(要素ごとに 1 件の検出になる)
+- `resource_region` は、同じ `id` が複数のリージョンに現れる種別(CloudTrail の証跡など。[リソースモデル](Architecture-Resource-Model.ja.md) の「id の一意性」)で、そのうち 1 つのリソースを検出の対象にするときに使う。`id` が一意な種別のルールは、付けなくてよい
 - `message` には構成情報の値を埋め込まず、値は `actual` に入れる(リソースの ID や名前は埋め込んでよい)。`--omit-values` で値を省けるようにするため([出力形式](Architecture-Output-Formats.ja.md) の「値の扱い」)
+- 構成情報は伏せずに入っているため([リソースモデル](Architecture-Resource-Model.ja.md) の「秘密の値の扱い」)、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない
 - 「全リージョンで有効でない」のように、特定の項目に結びつかない不合格では `path` を省いてよい
 - 知らないキーは無視する
-- `path` の形式が JSON Pointer でない、必須のキーが無い、`resource_id` が `target_type` のリソースでない、といった誤りは、そのルールの評価のエラー(状態 `error`)にする。`path` がリソースの中に実在するかは確かめない
+- `path` の形式が JSON Pointer でない、必須のキーが無い、`resource_id` が `target_type` のリソースでない、`resource_region` が文字列でない、その `id` とリージョンの組のリソースが `target_type` に無い、といった誤りは、そのルールの評価のエラー(状態 `error`)にする。`path` がリソースの中に実在するかは確かめない
 
 ### 書き方の注意
 
@@ -366,7 +375,7 @@ fail contains finding if {
 | | `skip_reason: Option<SkipReason>` | `status` が `Skipped` のときだけ `Some` |
 | | `error: Option<String>` | `status` が `Error` のときだけ `Some`(エラーの説明) |
 | | `results: Vec<RuleResult>` | リソース単位の結果。`Skipped` / `Error` のときは空 |
-| | `incomplete_resources: Vec<IncompleteResource>` | 構成情報に取得の失敗の印を持っていたリソース(`target_type` / `related_types` のもの)。各要素は `resource_id`、`resource_type`、`operation`(失敗した操作名)、`kind`。無ければ空 |
+| | `incomplete_resources: Vec<IncompleteResource>` | 構成情報に取得の失敗の印を持っていたリソース(`target_type` / `related_types` のもの)。各要素は `resource_id`、`resource_type`、`region`(リソースの `region`)、`operation`(失敗した操作名)、`kind`。無ければ空 |
 | `RuleStatus` | `Evaluated` / `Incomplete` / `Skipped` / `Error` | JSON では `evaluated` / `incomplete` / `skipped` / `error` |
 | `SkipReason` | `NotCollected` / `CollectionFailed` | JSON では `not_collected` / `collection_failed` |
 | `RuleResult` | `rule_id`、`status: ResultStatus`(`Pass` / `Fail`)、`severity`、`resource`(`id`、`type`、`account`、`region`)、`message`、`path`、`actual`、`expected` | リソース単位の結果。`pass` では `message` / `path` / `actual` / `expected` を持たない。ルール単位の状態は持たない |
@@ -375,12 +384,22 @@ fail contains finding if {
 
 ### リソース単位の結果
 
-ルールごとに、`target_type` のリソースそれぞれについて `RuleResult` を作ります。
+図: [fail の要素とリソースの対応づけ](../diagrams/Diagram-0011-Result-to-Resource-Mapping.md)
+
+ルールごとに、`target_type` のリソースそれぞれについて `RuleResult` を作ります。リソースは `id` とリージョン(リソースの `region`)の組で区別します([リソースモデル](Architecture-Resource-Model.ja.md) の「id の一意性」)。
+
+`fail` の要素は、次のリソースに対応づけます。
+
+- `resource_region` がある要素: `id` が `resource_id` で、`region` が `resource_region` のリソース
+- `resource_region` が無い要素: `id` が `resource_id` のすべてのリソース(リージョンを問わない)
 
 | 状況 | 結果 |
 | --- | --- |
-| `fail` にそのリソースの要素がある | `fail`(要素ごとに 1 件。`message`、`path`、`actual`、`expected` を要素から写す) |
-| `fail` にそのリソースの要素が無い | `pass`(1 件) |
+| `fail` にそのリソースに対応づく要素がある | `fail`(要素ごとに 1 件。`message`、`path`、`actual`、`expected` を要素から写す) |
+| `fail` にそのリソースに対応づく要素が無い | `pass`(1 件) |
+
+- `RuleResult.resource` の `region` には、対応づけたリソースの `region` を入れる
+- `incomplete_resources` の要素と `RuleResult` も、`resource_id` とリージョンの組で対応づける(レポートで `incomplete_resources` に挙がったリソースの `pass` を区別するため)
 
 ### ルールの状態(RuleStatus)
 
@@ -389,7 +408,7 @@ fail contains finding if {
 | `evaluated` | 評価できた |
 | `incomplete` | 評価できたが、`target_type` / `related_types` のいずれかの種別で、一部のリージョンの収集に失敗している、または構成情報に取得の失敗の印を持つリソースがある |
 | `skipped` | 評価しなかった。理由(`skip_reason`)は `not_collected`(未収集)か `collection_failed`(収集がすべて失敗) |
-| `error` | 評価中にエラーが起きた(時間切れ、`fail` の要素の形が不正、`target_type` のリソースでない `resource_id` を返した、など) |
+| `error` | 評価中にエラーが起きた(時間切れ、`fail` の要素の形が不正、`target_type` のリソースでない `resource_id` を返した、`resource_region` が文字列でない、その `id` とリージョンの組のリソースが無い、など) |
 
 ### 状態の判定順
 
@@ -429,13 +448,30 @@ fail contains finding if {
 | 読み込みの検証 | `yata-engine` | 「検証」と同じ(ライブラリ、構文、パッケージ名とパスの一致、メタデータ、名前の規則) |
 | フィクスチャのそろい方 | `yata-engine` | 各ルールに `pass_` と `fail_` のフィクスチャが 1 つ以上ある。フィクスチャの形式が正しく、宣言した種別の配列がそろっている。対応するルールの無い `.fixtures` ディレクトリが無い |
 | ダミー値 | `yata-engine` | フィクスチャに含まれる 12 桁の数字が、ダミーとして認めた値の一覧にある |
-| フィクスチャの実行 | `yata-engine` | 各フィクスチャを評価し、`expected.fail` と一致するかを確かめる |
+| フィクスチャの実行 | `yata-engine` | 各フィクスチャを評価し、`expected.fail` と一致するかを確かめる(下の「期待値の比べ方」) |
 | プロバイダの対応 | `yata-cli` | ルールの `target_type` / `related_types` が、実行中の `yata` のプロバイダが対応する種別である |
 
 - ディレクトリ全体に関わる失敗と引数の誤りは終了コード 2 にする
 - ルール単位の失敗(上の「失敗の種類と終了コード」の表で「ルール単位」のもの)は、1 つのルールの失敗で止めずに全ルールを検査してから、失敗をまとめて報告する。失敗が 1 つでもあれば終了コード 1 にする(CI で全部の問題を一度に見られるようにするため)
 - 失敗の報告には、ルール ID とファイルのパスを含める
 - ポリシーのリポジトリの CI では、そのマニフェストの `min_yata_version` 以上の `yata` を使う
+
+### 期待値の比べ方
+
+図: [フィクスチャの期待値と結果の対応](../diagrams/Diagram-0011-Result-to-Resource-Mapping.md)
+
+フィクスチャの `expected.fail` の要素は、`id` の文字列か、`{"id": ..., "region": ...}` のオブジェクトで書きます([ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md) の「フィクスチャの形式」)。
+
+- 期待する不合格のリソースの集合を、`id` とリージョンの組の集合として作る
+  - 文字列: `input` の `target_type` のリソースのうち、その `id` のすべてのリソース(リージョンを問わない)
+  - オブジェクト: その `id` とリージョンのリソース
+- 実際の不合格のリソースの集合(上の「リソース単位の結果」で `fail` になったリソースの、`id` とリージョンの組の集合)と比べ、一致すれば合格とする。1 つのリソースに対する検出の件数は比べない
+- これにより、同じ `id` のリソースのうちどのリージョンのものが不合格か(ルールが `resource_region` を正しく付けたか)を確かめられる
+- 次はフィクスチャの形式の誤り(ルール単位の失敗)とする
+  - 同じ `id` の文字列を重ねて書く、同じ `{id, region}` を重ねて書く、同じ `id` を文字列とオブジェクトの両方で書く
+  - オブジェクトに `id` と `region` のどちらかが無い、または文字列でない
+  - 要素が `input` の `target_type` のリソースを 1 つも指さない(文字列の `id` のリソースが無い、オブジェクトの `id` とリージョンのリソースが無い)。`id` を書き間違えた `fail_` のフィクスチャが、何も検出しないルールで黙って通るのを防ぐため。ルールの `fail` の要素で、その `id` とリージョンのリソースが無い場合を評価のエラーにするのと対称の扱い
+  - `input` の同じ種別の配列に、`id` と `region` の組が同じリソースが複数ある([リソースモデル](Architecture-Resource-Model.ja.md) の「id の一意性」)
 
 フィクスチャの書式は [ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md) を参照してください。
 
@@ -452,7 +488,6 @@ fail contains finding if {
 | regorus の有効にする機能 | `net`(CIDR の判定)、`regex`、`glob`、`time` など、ルールで使う組み込み関数に必要な cargo feature の組み合わせ。ファイル・ネットワークにアクセスする機能は含めない(「外部のポリシーの安全性」の (e)) | ポリシーエンジンを実装する Issue |
 | 評価時間の上限の既定値 | `--policy-timeout` の既定値 | ポリシーエンジンを実装する Issue |
 | 評価時間の上限の実現方法 | regorus の API 文書には `set_execution_timer_config` があるが、`eval_rule` での評価を確実に打ち切れるかを確認する。打ち切れない場合の代替は、別スレッドで評価して時間切れで結果を捨てる方法など | ポリシーエンジンを実装する Issue |
-| 対象とする CIS のバージョン | `references` に書く CIS AWS Foundations Benchmark のバージョン。決める Issue の時点で CIS の公開ページから最新版を確認する | 最初のルール群を決める Issue |
 | ルールの除外・抑制 | 特定のリソースやルールを結果から除外する仕組み(設定ファイル、タグなど)。ルール ID にバージョンを含めないので、ID を基準にできる | 別 Issue |
 | ポリシーのディレクトリの既定の場所 | プラットフォームのデータディレクトリ(例: Linux の `~/.local/share/yata/policies`)を既定にするか。既定にする場合はパスを決めるクレート(`directories` など)の追加が必要([初期依存クレート](Architecture-Initial-Dependencies.ja.md))。決まるまでは既定なし(指定が無ければ終了コード 2) | ポリシーのリポジトリの配布方法を決める Issue |
 | ポリシーの取得・更新 | ポリシーのリポジトリの取得・更新(git clone、リリースのアーカイブのダウンロードなど)を `yata` が行うか、利用者に任せるか。行う場合はネットワークへのアクセスと署名・改ざんの確認が必要になる。決まるまでは `yata` は取得しない | ポリシーのリポジトリの配布方法を決める Issue(この Issue の範囲外) |

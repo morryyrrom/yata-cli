@@ -10,7 +10,7 @@
 - 各形式は `ScanReport` と出力先(`std::io::Write`)を受け取る関数として実装する。`yata-report` は渡された `Write` に書くだけで、ファイルを開かない
 - 出力先を開くのは `yata-cli` で、標準出力か、`--output` のファイルを渡す
 - `--output` でファイルに書く場合は、`yata-cli` が同じディレクトリの一時ファイルを開いて `yata-report` に渡し、書き終えてから名前を変える。途中で失敗したときに壊れたファイルを残さない
-- 結果の並び順は、重要度の高い順 → ルール ID → リソース ID とし、同じ入力から同じ出力になるようにする
+- 結果の並び順は、重要度の高い順 → ルール ID → リソース ID → リージョンとし、同じ入力から同じ出力になるようにする。同じリソース ID が複数のリージョンに現れることがあるため、リージョンも順序に含める([リソースモデル](Architecture-Resource-Model.ja.md) の「id の一意性」)
 - 対応する形式は `table`、`json`、`sarif` の 3 つ
 - `ScanReport` は `yata-cli` が、評価結果・収集エラー・メタ情報から組み立てる
 - 終了コード 2 / 3 と 130 のときは、どの形式でもレポートを出力しない(理由は標準エラー出力に出す)。例外として、出力の書き込み中の失敗で終了コード 3 になった場合、`--output` のときは一時ファイルを削除して既存のファイルは変えず、標準出力のときは途中まで出力されていることがある([CLI インターフェース](Architecture-CLI-Interface.ja.md))
@@ -45,7 +45,7 @@ JSON の形式では、`outcomes` を `rules[]`(`results` を除いたルール 
 
 検出(`fail`)は、ルールが返した `path`(不合格の箇所。JSON Pointer)、`actual`(実際の値)、`expected`(期待する値)を持ちます([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)。
 
-- `actual` は構成情報から取り出した値なので、機微な値になりうる。ただし秘密に当たる値は、収集の時点で `"<redacted>"` に伏せてある([リソースモデル](Architecture-Resource-Model.ja.md) の「秘密の値の扱い」)ため、レポートにも伏せた値が出る
+- `actual` は構成情報から取り出した値で、構成情報は伏せずに入っているため、機微な値(メールアドレス、URL に埋め込まれた認証情報など)が入りうる([リソースモデル](Architecture-Resource-Model.ja.md) の「秘密の値の扱い」)。レポートを外部に出すときは `--omit-values` を使う
 - 既定では、すべての形式に `actual` / `expected` を含める。`--omit-values` を指定した場合は、どの形式でも `actual` / `expected` を省き、`scan.values_omitted` を `true` にする(`path` と `message` は残す)。レポートを外部(CI の公開ログ、GitHub code scanning など)に出すときに使う
 - `message` はルールが作る文字列なので、ルールが値を埋め込んでいれば `--omit-values` でも残る。ルールの作者向けの規約として、`message` には値を埋め込まず、値は `actual` に入れる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)
 - table では、`actual` / `expected` を JSON の文字列にし、長いものは一定の長さで切り詰めて表示する(長さは実装時に決める)。JSON と SARIF では切り詰めない
@@ -57,7 +57,7 @@ JSON の形式では、`outcomes` を `rules[]`(`results` を除いたルール 
 - 先頭に集計(重要度ごとの検出の件数、ルールの状態ごとの件数)を表示する
 - 続けて検出(`fail`)を表で表示する。列は重要度、ルール ID、リソース ID、リージョン、メッセージ、箇所(`path`)、値(`actual` と `expected`。`--omit-values` のときは表示しない)
 - `--show-passed` のときは `pass` の結果も表示する
-- 収集エラーとルールの `skipped` / `error` / `incomplete` があれば、最後にまとめて表示する。`incomplete` では、取得の失敗の印を持っていたリソース(`incomplete_resources`)と失敗した操作名も表示する。`--show-passed` で表示する `pass` のうち、`incomplete_resources` に挙がったリソースのものには印を付ける
+- 収集エラーとルールの `skipped` / `error` / `incomplete` があれば、最後にまとめて表示する。`incomplete` では、取得の失敗の印を持っていたリソース(`incomplete_resources`)と失敗した操作名も表示する。`--show-passed` で表示する `pass` のうち、`incomplete_resources` に挙がったリソース(リソース ID とリージョンで対応づける)のものには印を付ける
 - 色付けは `--color` と `NO_COLOR` に従う
 - table の書式は互換性を保証しない(機械処理には JSON を使う)
 
@@ -138,7 +138,7 @@ JSON の形式では、`outcomes` を `rules[]`(`results` を除いたルール 
 
 - `pass` の結果も常に含める(`--show-passed` は table だけに効く)
 - `rules[]` の `skip_reason` と `error` は常に置き、該当しないときは `null` にする。`skip_reason` は `status` が `skipped` のときだけ値(`not_collected` / `collection_failed`)を持ち、`error` は `status` が `error` のときだけ値(説明の文字列)を持つ
-- `rules[]` の `incomplete_resources` は、構成情報に取得の失敗の印を持っていたリソースの一覧(`resource_id`、`resource_type`、`operation`、`kind`)。無ければ空の配列
+- `rules[]` の `incomplete_resources` は、構成情報に取得の失敗の印を持っていたリソースの一覧(`resource_id`、`resource_type`、`region`、`operation`、`kind`)。`region` はリソースの `region`(同じ `resource_id` が複数のリージョンに現れる場合に区別するため)。無ければ空の配列
 - `results[]` はリソース単位の `pass` / `fail` の結果(`RuleResult`)を、全ルール分まとめて並べる
 - `results[]` の `fail` では `message`、`path`、`actual`、`expected` を常に置き、ルールが返さなかったものは `null` にする。`--omit-values` のときは `actual` / `expected` のキーごと省く。`pass` ではこの 4 つを置かない
 - `schema_version` は互換性の無い変更(項目の削除・意味の変更)のときに上げる。項目の追加では上げない
@@ -175,5 +175,6 @@ CI のコードスキャン結果の表示(GitHub code scanning など)と連携
 | --- | --- | --- |
 | GitHub code scanning での表示 | 結果にファイルの位置が必要なため、IaC のファイルとの対応付け、または仮の位置を入れるかどうか。SARIF としての妥当性は位置なしでも保てる | SARIF 出力を実装する Issue |
 | 日時の整形に使うクレート | RFC 3339 の日時を作るクレート([初期依存クレート](Architecture-Initial-Dependencies.ja.md) の未決事項) | 出力を実装する Issue |
+| SARIF での同じリソース ID の区別 | 同じリソース ID でリージョンの違う検出(CloudTrail の shadow trail など)は、`logicalLocations` の `fullyQualifiedName` が同じになり、区別が `properties.region` だけになる。GitHub code scanning などで同じ結果として扱われうるため、リージョンを `logicalLocations` に含める(2 つ目の logical location にするなど)か | SARIF 出力を実装する Issue |
 | SARIF のスキーマ検証 | テストで SARIF の JSON Schema による検証を行うか(検証用の dev-dependency が増える) | SARIF 出力を実装する Issue |
 | ほかの形式 | CSV、HTML、OCSF など | 需要が出た時点で別 Issue |
