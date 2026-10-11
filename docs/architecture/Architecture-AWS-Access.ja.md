@@ -2,7 +2,7 @@
 
 > This Japanese version is the authoritative source. The English version (`Architecture-AWS-Access.md`) has not been written yet.
 
-AWS への接続方法、認証情報の扱い、リージョン、コレクターの構成、読み取り専用の強制、必要な IAM 権限を定めます。SDK の選定と読み取り専用ガードの判断は [ADR: AWS SDK for Rust と読み取り専用ガード](../adr/ADR-0001-AWS-SDK-and-Read-Only-Guard.ja.md) を参照してください。入口は [アーキテクチャ概要](Architecture-Overview.ja.md) です。
+AWS への接続方法、認証情報の扱い、リージョン、コレクターの構成、読み取り専用の強制、必要な IAM 権限を定めます。SDK の選定と読み取り専用ガードの判断は [ADR: AWS SDK for Rust と読み取り専用ガード](../adr/ADR-0001-AWS-SDK-and-Read-Only-Guard.ja.md)、ガードの例外リストに加えた操作の判断は [ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) を参照してください。入口は [アーキテクチャ概要](Architecture-Overview.ja.md) です。
 
 ## SDK
 
@@ -70,7 +70,8 @@ pub(crate) trait Collector: Send + Sync {
 - `CollectContext` は SDK の設定、アカウント情報、読み取り専用ガード付きのクライアントを作る手段を持つ
 - `Scope::Global` のコレクターは 1 回、`Scope::Regional` は対象リージョンごとに実行する
 - 1 つのリソースを作るのに複数の API が必要な場合(例: バケット一覧 → バケットごとの設定)、それらは同じコレクターの中で呼ぶ。結果は構成情報(`configuration`)に API の操作名ごとに入れる([リソースモデル](Architecture-Resource-Model.ja.md) の「構成情報」)
-- SDK の出力型から構成情報への変換と、秘密に当たる項目を伏せる一覧は、コレクターのファイルに置く([リソースモデル](Architecture-Resource-Model.ja.md) の「秘密の値の扱い」)
+- SDK の出力型から構成情報への変換は、コレクターのファイルに置く
+- コレクターは情報を集めるだけにする。API は既定のパラメーター(ページングのためのパラメーターと必須の識別子を除き、結果を絞り込む・広げるオプションを付けない)で呼び、返った結果を絞り込まず・置き換えずに入れる。秘密の値も伏せない([リソースモデル](Architecture-Resource-Model.ja.md) の「コレクターの方針」)
 - 同じサービスの複数のコレクターが共通の処理を使う場合は、`crates/yata-provider-aws/src/support/` に置く(build.rs の検出対象外)
 
 ### 実行
@@ -97,7 +98,7 @@ pub(crate) trait Collector: Send + Sync {
 
 ## 読み取り専用の強制
 
-次の 3 段で、Describe / List / Get 系以外の API と、秘密の値の取得・認証情報の発行を行う API を呼ばないようにします。
+次の 3 段で、Describe / List / Get 系以外の API(例外リストにある操作を除く)と、秘密の値の取得・認証情報の発行を行う API を呼ばないようにします。
 
 1. **実行時のガード**: すべてのサービスクライアントに、SDK のインターセプターとして読み取り専用ガードを付ける。ガードはリクエストの送信前に、呼び出す操作名(SDK が設定に入れる操作のメタデータ)とサービス名を調べ、次の操作をエラーにして送信させない
    - `Describe`、`List`、`Get` のいずれでも始まらない操作(例外リストにあるものを除く)
@@ -115,12 +116,16 @@ pub(crate) trait Collector: Send + Sync {
    - ガードが比べるサービス名の正確な文字列(操作のメタデータの `service` の値)は、ガードの実装方法の確認(未決事項)とあわせて実装時に確かめる
    - 判定は「拒否リスト → 例外リスト → 接頭辞(Describe / List / Get)」の順に行う。拒否リストにある操作は例外リストより優先して拒否する
    - クライアントは `yata-provider-aws/src/support/` の生成用マクロ(またはヘルパー)でだけ作る。コレクターで `Client::new` / `Client::from_conf` を直接呼ばない
-   - 例外リスト・拒否リストはどちらも `support/` 内に理由とともに書く。初期状態の例外リストは空
+   - 例外リスト・拒否リストはどちらも `support/` 内に理由とともに書く
+   - 例外リストは、名前が Describe / List / Get で始まらないが、リソースを作成・変更・削除しない操作を載せる。拒否リストと同じく、SDK の操作の名前(サービス + 操作名)で書き、IAM アクション名を併記する。初期の例外リストは次のとおり(サービス / 操作名 → IAM アクション名)
+     - IAM / `GenerateCredentialReport` → `iam:GenerateCredentialReport`。理由: アカウントに 1 つだけある認証情報レポートを作り直す操作で、IAM のユーザー・認証情報・ポリシー・アカウントの設定を作成・変更・削除しない。4 時間以内に作ったレポートがあれば IAM はそれを使う。CIS の監査の手順もこのレポートを使い、AWS 管理ポリシー `SecurityAudit` もこの権限を含む([ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md))
+   - ほかの操作(例: `GenerateServiceLastAccessedDetails`)は、必要になった時点で同じように判断する
    - この 2 つのリストは中央の列挙だが、追加の頻度が低い共有箇所として扱う([ワークスペース構成](Architecture-Workspace-Layout.ja.md))。変更は機能の PR に混ぜず、メンテナーの判断を経た単独の PR で行う
 2. **テスト**:
-   - すべてのコレクターの `required_permissions` が `<service>:(Describe|List|Get)...` の形で、拒否リストの操作を含まないことを確かめる。`required_permissions` は IAM アクション名なので、拒否リストの各項目に併記した IAM アクション名と比べる(SDK の操作名とは直接比べない)
+   - すべてのコレクターの `required_permissions` が `<service>:(Describe|List|Get)...` の形か、例外リストにある操作の IAM アクション名であり、拒否リストの操作を含まないことを確かめる。`required_permissions` は IAM アクション名なので、拒否リスト・例外リストの各項目に併記した IAM アクション名と比べる(SDK の操作名とは直接比べない)
    - コレクターのソースに `Client::new` / `Client::from_conf` が無いことを確かめる(ソースを文字列で検査するテスト)
    - ガードが書き込み系の操作名と、拒否リストの操作を拒否することを確かめる
+   - ガードが例外リストの操作(`GenerateCredentialReport`)を通し、例外リストに無いほかの同じ接頭辞の操作(例: `GenerateServiceLastAccessedDetails`)を拒否することを確かめる
 3. **コードレビュー**: SDK の呼び出しが読み取り専用で、拒否リストに相当する操作(秘密の値の取得、認証情報の発行、データの中身の読み取り)を新たに使っていないかを確認する。該当する操作を見つけたら拒否リストへの追加を検討する
 
 認証情報の解決で SDK が内部で呼ぶ操作は、このガードの対象外です(上の「認証情報の解決で SDK が内部で呼ぶ操作」を参照)。
@@ -128,8 +133,9 @@ pub(crate) trait Collector: Send + Sync {
 ## 必要な IAM 権限
 
 - 常に必要: `sts:GetCallerIdentity`、`ec2:DescribeRegions`(`--region` を指定しない場合)
-- そのほかは、実行するコレクターの `required_permissions` の和集合
+- そのほかは、実行するコレクターの `required_permissions` の和集合。例外リストにある操作の権限(`iam:GenerateCredentialReport`)も、それを使うコレクターの `required_permissions` に含める
 - `yata permissions` コマンドが、選んだルールに必要な権限を IAM ポリシーの JSON として出力する。権限の一覧を手で保守する文書は作らない
+- Describe / List / Get 以外の操作を使うことを `yata permissions` の出力でどう示すかは、`yata permissions` を実装する Issue で決める([最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の未決事項「`yata permissions` での例外の操作の示し方」)
 - 利用者向けの案内では、最小権限として `yata permissions` の出力を使う方法と、AWS 管理ポリシー `SecurityAudit` を付ける方法を示す(利用者ガイドを作る Issue で書く)
 - 権限不足(`AccessDenied` など)の扱いは [エラー処理とログ](Architecture-Error-Handling-and-Logging.ja.md) を参照
 
@@ -140,12 +146,14 @@ pub(crate) trait Collector: Send + Sync {
 - 操作のメタデータ(`Metadata`): <https://docs.rs/aws-smithy-runtime-api/latest/aws_smithy_runtime_api/client/orchestrator/struct.Metadata.html>
 - `sts:GetCallerIdentity`: <https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html>
 - `ec2:DescribeRegions`: <https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeRegions.html>
+- `iam:GenerateCredentialReport`: <https://docs.aws.amazon.com/IAM/latest/APIReference/API_GenerateCredentialReport.html>
+- IAM の認証情報レポート(生成の間隔、必要な権限): <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_getting-report.html>
+- AWS 管理ポリシー `SecurityAudit`: <https://docs.aws.amazon.com/aws-managed-policy/latest/reference/SecurityAudit.html>
 
 ## 未決事項
 
 | 項目 | 内容 | 決める時期 |
 | --- | --- | --- |
-| Describe / List / Get 以外の読み取り操作 | CIS の IAM 関連のチェックで使われる認証情報レポートは、`iam:GetCredentialReport` の前に `iam:GenerateCredentialReport` でレポートを生成する必要がある。`Generate` はリソースを変更しないが、名前の規則(Describe / List / Get)からは外れる。例外として許すか、別の API で代替するか | 認証情報レポートを使うルールの Issue(メンテナーの判断が必要) |
 | `aws` 以外のパーティション | GovCloud、中国リージョンへの対応。当面はパーティションが `aws` でなければ終了コード 3 | 需要が出た時点で別 Issue |
 | `--profile` の認証情報の限定 | `--profile` のとき、環境変数の認証情報を使わずにプロファイルの認証情報だけを使う方法の確認([CLI インターフェース](Architecture-CLI-Interface.ja.md) の未決事項) | AWS プロバイダを実装する Issue |
 | 複数アカウントのスキャン | AWS Organizations の配下のアカウントを順に引き受けてスキャンするか | 別 Issue |

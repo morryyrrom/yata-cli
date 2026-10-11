@@ -9,8 +9,29 @@
 - リソースは「共通の項目」と「種別ごとの構成情報(`configuration`)」に分ける
 - 共通の項目は Rust の型(`yata-core`)で定義する。構成情報は JSON の値(`serde_json::Value`)として持ち、Rust の共通の型には入れない
   - 種別ごとに Rust の型を `yata-core` に足すと、全機能が `yata-core` を書き換えることになり、並列開発で衝突するため
-- 構成情報には、SDK が返した値をすべて入れる。ただし秘密に当たる値は伏せる(下の「秘密の値の扱い」)
+- 構成情報には、SDK が返した値をすべて入れる。秘密の値も伏せない(下の「コレクターの方針」「秘密の値の扱い」)
 - 収集した結果は「アカウント × リージョン × リソース種別」を 1 単位(`ResourceSet`)としてまとめる
+
+### コレクターの方針
+
+コレクターは次の方針に従います。最初に適用した範囲とその詳細は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「コレクターの方針」を参照してください。
+
+- **コレクターは情報を集めるだけにする**。合否の判定と、判定に向けた絞り込み(CloudTrail の shadow trail の見分け、アタッチされた IAM ポリシーだけを対象にするなど)は Rego のルールで行う
+- **API は既定のパラメーターで呼ぶ**。結果を絞り込む・広げるオプション(`Filters`、`Scope`、`includeShadowTrails` など)を付けない。次のものは「オプション」に含めない
+  - ページングのためのパラメーター: 続きを取るトークン(`NextToken`、`Marker`、`ContinuationToken` など)と、ページングの形で呼ぶためのページの大きさ(`ListBuckets` の `MaxBuckets` など)。どちらも返るリソースの集合を変えない
+  - 必須の識別子: リソースごとの操作で対象を指すもの(`GetBucketPolicy` の `Bucket`、`GetPolicyVersion` の `PolicyArn` と `VersionId`、`GetTrailStatus` の `Name` など)
+- **返った結果は、絞り込まず・置き換えずにすべて入れる**
+- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バイナリ(Blob)の base64 の文字列への変換と、テキストの形式が定められた Blob の構造化、ポリシー文書の URL デコードと JSON のパース(下の「項目名と値の規則」)。ページングの項目と応答のメタデータを含めないことは、下の「格納の形」のとおり
+- **秘密の値も伏せない**。ただし、秘密の値の取得そのものが目的の API(読み取り専用ガードの拒否リストの操作)は呼ばない(下の「秘密の値の扱い」)
+- **あるリソースと 1 対 1 で対応する情報は、呼び出す API が分かれていても 1 つのリソースにまとめる**
+  - リソースごとに呼ぶ取得の操作(`GetBucketPolicy`、`GetTrailStatus` など)の出力を、操作のキーで一覧の操作と同じリソースに入れる形(下の「格納の形」)は、この原則の一つである
+  - アカウントに 1 つの操作の出力でも、その中の要素がリソースと 1 対 1 で対応するなら、要素ごとに対応するリソースに入れる。例: IAM の認証情報レポート(`GetCredentialReport`)の各行を、その行のユーザーの `aws.iam.user` に入れる(下の「格納の形」)。これは絞り込みではなく、この原則による対応づけで、行の内容は変えずに入れる
+- **まとめる対象は、あるリソースに付随する情報に限る**。アカウント(`aws.account.account`)は、この原則でいう「あるリソース」に含めない。アカウントに 1 つだけの設定(IAM のアカウントの概要、パスワードポリシー、S3 のアカウントのパブリックアクセスブロックなど)は、`aws.account.account` にまとめず、それぞれ別の種別にする
+  - 理由: サービスの異なる設定を 1 つの種別にまとめると、ある設定の収集の失敗がその種別を使うすべてのルールに波及し([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「状態の判定順」)、関係の無い判定まで `incomplete` になる。また、1 つのコレクターがサービスをまたぎ、1 リソース種別 1 ファイルの構成と、サービスごとの並行の作業が崩れる
+  - リソースと 1 対多で対応する情報(EC2 の `DescribeInstances` の予約とインスタンスなど)は、この原則の対象ではない。扱いはその種別の機能設計書で決める
+- **例外**: 「すべて入れる」に対する例外は、次のものだけとする
+  - `aws.account.account` には `GetCallerIdentity` の `Account` だけを入れる(下の「アカウントのリソース」)
+  - 認証情報レポートのルートユーザーの行(`<root_account>`)は、対応するリソースが無いため、入れ先が決まるまでどのリソースにも入れない(入れ先が決まるまでの暫定の不足。[最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の未決事項「認証情報レポートのルートユーザーの行」)
 
 ## 名前と区切りの文字
 
@@ -52,7 +73,7 @@
 
 | 項目 | 型 | 必須 | 内容 |
 | --- | --- | --- | --- |
-| `id` | 文字列 | 必須 | リソースを一意に識別する値。ARN があれば ARN。無い場合は下の「ARN が無いリソースの id」の形式 |
+| `id` | 文字列 | 必須 | リソースを識別する値。`ResourceSet` の中(アカウント × リージョン × 種別)で一意。ARN があれば ARN。応答に ARN が無くても AWS が ARN の形式を定義している種別は、その形式で作った ARN。AWS が ARN を定義していない種別は、下の「ARN が無いリソースの id」の形式(下の「id の一意性」) |
 | `type` | 文字列 | 必須 | リソース種別 |
 | `account` | 文字列 | 必須 | アカウントキー(例: `aws-123456789012`) |
 | `region` | 文字列 | 必須 | リージョン。グローバルなリソースは `global` |
@@ -62,7 +83,27 @@
 
 `configuration` という名前は、AWS Config がリソースの構成情報を表すのに使う名前に合わせたものです。`resources` は `ResourceSet.resources` と重なり、`attributes` / `properties` は意味が広く、何が入るかが分かりにくいため採りませんでした。
 
+### id の一意性
+
+- リソースは、アカウント・リージョン・種別・`id` の組で識別する。ここでのリージョンはリソースの `region` の値(S3 のバケットのように、`ResourceSet` の `region` が `global` でリソースの `region` がバケットのリージョンになるものも、リソースの `region` を使う)
+- `id` が一意であるのは `ResourceSet` の中(アカウント × リージョン × 種別)
+- リソースの `region` と `id` の組も、アカウント × 種別の中で一意になる。これは次の 2 つの前提による
+  - `regional` の種別では、リソースの `region` は、そのリソースを入れた `ResourceSet` の `region` と同じ
+  - 1 つの種別は、`global` の `ResourceSet` か、リージョンごとの `ResourceSet` の、どちらか一方だけを持つ(スコープは種別ごとに 1 つ)
+- 外から読み込む入力でも、この一意性を確かめる。スナップショットでは `ResourceSet` の中の `id` の重複を検証の誤りにし(下の「読み込みと検証」)、フィクスチャでは `input` の同じ種別の中の `id` と `region` の組の重複を形式の誤りにする([ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md))
+- AWS が同じリソースを複数のリージョンに見せる場合に限り、同じ `id` が複数のリージョンの `ResourceSet` に現れてよい。例: CloudTrail のマルチリージョンの証跡は、ホームリージョンの証跡とほかのリージョンの shadow trail が同じ ARN で返るため、どれも `TrailARN` を `id` にする
+  - コピーごとに別の `id`(リージョンを加えた形など)を作らない。ARN があるのに ARN を使わない例外になり、コレクターが shadow trail かを見分けて `id` を変えることになるため。AWS 自身も、どのリージョンのコピーにも同じ ARN を使う
+- このため、ルールの `input` の配列には、同じ `id` で `region` だけが違うリソースが並びうる(下の「ポリシーエンジンへの渡し方」)。ルールの検出とフィクスチャの期待値は、必要に応じてリージョンも指定して 1 つのリソースを指せる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)
+
+### ARN を形式から作るリソースの id
+
+- 応答に ARN が含まれなくても、AWS が ARN の形式を定義している種別(EC2 の VPC、ネットワーク ACL、インスタンス、フローログなど)は、「ARN が無いリソース」に当たらない。AWS の文書の ARN の形式(Service Authorization Reference の各サービスの「Resource types」の表)に従って作った ARN を `id` にする
+  - 例: `arn:aws:ec2:us-east-1:123456789012:vpc/vpc-0123456789abcdef0`
+- 各種別の形式は、そのコレクターの機能設計書で表と照らして確かめる
+
 ### ARN が無いリソースの id
+
+AWS が ARN を定義していない種別にだけ使います。
 
 - 名前で区別するリソース: `<type>:<account_id>:<region>:<name>`(例: `aws.example.widget:123456789012:us-east-1:example-name`)
 - アカウント・リージョンに 1 件だけのリソース(名前が無いもの): `<type>:<account_id>:<region>`(例: `aws.iam.password_policy:123456789012:global`)
@@ -74,7 +115,8 @@
 - 種別は `aws.account.account`(`<service>` は AWS のアカウント管理のサービス名 `account`)
 - アカウントごとに 1 件だけ作る。`region` は `global`、`id` は `aws.account.account:<account_id>:global`、`name` は持たない
 - コレクターではなく、`yata-provider-aws` が `sts:GetCallerIdentity` の結果から作る。このため、ルールとコレクターの対応の検査では例外とし、`yata-provider-aws` が公開する対応する種別の一覧には含める([ポリシー評価](Architecture-Policy-Evaluation.ja.md))
-- `configuration` には `GetCallerIdentity` の `Account` だけを入れる。呼び出し元の ARN やユーザー ID は、ルールの判定に使わず、実行した人の情報を残さないため入れない(SDK の応答をすべて入れる方針の例外)
+- `configuration` には `GetCallerIdentity` の `Account` だけを入れる。呼び出し元の ARN やユーザー ID は入れない(SDK の応答をすべて入れる方針の例外)
+  - 理由: この種別はコレクターの収集で作るものではなく、`yata-provider-aws` がアカウントを識別するために作るものだから。また、呼び出し元の ARN やユーザー ID はルールの判定に使わず、実行した人の情報を残さないため
 
 ```json
 {
@@ -100,7 +142,15 @@
 - 値は、その操作の出力のうち、そのリソースに当たる部分
   - 一覧・説明の操作(`ListBuckets`、`DescribeInstances` など)では、出力の配列の中のそのリソースの要素
   - リソースごとの取得の操作(`GetPublicAccessBlock`、`GetBucketPolicy` など)では、出力全体
-  - どちらも、ページングの項目(`NextToken`、`Marker` など)と応答のメタデータは含めない
+  - アカウントに 1 つの操作で、出力の中の要素がリソースと 1 対 1 で対応するもの(上の「コレクターの方針」)では、そのリソースに対応する要素。要素の取り出し方と値の形は、その種別の機能設計書で決める
+  - どれも、ページングの項目(`NextToken`、`Marker` など)と応答のメタデータは含めない
+- API は既定のパラメーターで呼び、返った結果を絞り込まずに入れる(上の「コレクターの方針」)
+- 例: IAM の認証情報レポート(`GetCredentialReport`)
+  - レポートはアカウントに 1 つで、`Content` は CSV のテキストの Blob。各行が 1 人の IAM ユーザー(またはルートユーザー)に対応する
+  - 行の `arn` がユーザーの ARN と一致する行を、そのユーザーの `aws.iam.user` の `GetCredentialReport` のキーに、`{"GeneratedTime": "<RFC 3339>", "ReportFormat": "text/csv", "Content": {<列名>: <値>, ...}}` として入れる。出力の項目(`GeneratedTime`、`ReportFormat`、`Content`)はすべて入れ、`Content` だけをその行にする。列名は IAM のドキュメントの CSV の列名(`password_enabled` など。snake_case)、値は CSV の文字列のまま(`"TRUE"`、`"N/A"` などを変換しない)
+  - `Content` を構造化して入れるのは、下の「項目名と値の規則」の、テキストの形式が定められた Blob の扱いによる。出力全体ではなく行を入れるのは、上の 1 対 1 の対応づけによる
+  - 対応するリソースの無いルートユーザーの行は入れない(上の「コレクターの方針」の例外)
+  - 詳細は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「認証情報レポート」。同ページと [認証情報レポートの収集の流れ](../diagrams/Diagram-0005-Credential-Report-Collection-Flow.md) の値の形(`ReportFormat` を含まない)は、認証情報レポートのコレクターの機能設計書で、このページの形に合わせる
 - API が「設定が存在しない」ことを示すエラー(例: パブリックアクセスブロックの設定が無い)を返した場合は、その操作のキーの値を `null` にする。どのエラーがこれに当たるかは、各コレクターの機能設計書で決める
 - そのほかのエラーの扱いは、失敗した操作の種類で分ける(下の「操作ごとの取得の失敗」)
 
@@ -148,21 +198,24 @@
 - 操作のキーの値を、`yata_error` だけを持つオブジェクトにする
   - `kind` は `CollectionError` の `kind` と同じ値(`access_denied` / `throttled` / `timeout` / `service` / `invalid_response` など)
   - `message` は英語で、認証情報を含めない
-- キー名 `yata_error` は英小文字で始まるので、AWS API の項目名(PascalCase)とは重ならない
+- 失敗の印は操作のキーの値の最上位に置く。AWS のどの操作の出力にも、最上位の項目 `yata_error` は無いため、出力と取り違えない(項目名には camelCase のものや、認証情報レポートの snake_case の列名も入るため、名前の書き方の違いには頼らない)
 - Rego からは `object.get(r.configuration, ["GetBucketPolicy", "yata_error"], null) != null` で見分けられる
 - 印の下の項目(例: `GetBucketPolicy.Policy`)は undefined になるため、それを参照するルールの本体は成り立たず、そのリソースは `fail` に入らない。このため、`yata-engine` は失敗の印を持つリソースがあればルールの状態を `incomplete` にし、そのリソースを `RuleOutcome.incomplete_resources` に記録する。黙って `pass` だけを出さない([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「状態の判定順」)
 - 失敗の印はスナップショットにもそのまま保存する
 
 ### 項目名と値の規則
 
-- 項目名は AWS API リファレンスの名前(PascalCase のメンバー名)をそのまま使う
+- 項目名は、サービスのモデルのメンバー名(AWS API リファレンスと `aws` CLI の JSON 出力と同じ名前)をそのまま使う。多くのサービスでは PascalCase だが、CloudWatch Logs(`filterName`、`logGroupName` など)のように camelCase のサービスもあり、どちらもそのまま使う
   - AWS のドキュメントと `aws` CLI の JSON 出力と同じ名前になり、ルールの作者が照らし合わせやすいため
   - Rust の SDK の名前(snake_case)は SDK の版によって変わることがあるが、API の名前は AWS が互換性を保つため、こちらの方が安定する
+  - 構成情報のキー(操作名)は、サービスによらず PascalCase(上の「格納の形」)
 - 値の変換の規則
   - 日時は RFC 3339(UTC)の文字列
   - 列挙型は API の値の文字列
   - 数値・真偽値はそのまま
-  - バイナリ(Blob)は入れない(キーごと省く)
+  - バイナリ(Blob)は、標準の base64(RFC 4648 の標準の文字。パディングあり)の文字列にする。JSON にはバイト列をそのまま入れられないためで、値の意味・件数を変えない形式の変換として扱う。`aws` CLI のドキュメントの例でも、出力の Blob を base64 の文字列としてデコードしている
+    - AWS のドキュメントでテキストの形式(CSV、JSON など)が定められた Blob は、その種別の機能設計書で決めて、構造化して入れてよい(例: 認証情報レポートの `Content`。上の「格納の形」)。構造化するときも、値を真偽値や `null` に変えるなど、意味を変える変換はしない
+    - base64 にするか構造化するかは、その種別を公開する前に機能設計書で決める。公開した後に変えるのは、型の変更なので互換性の無い変更になる(下の「構成情報の互換性」)
   - ポリシー文書(IAM ポリシー、バケットポリシーなど、JSON を文字列で返す項目)は、JSON にパースしたオブジェクトにする。URL エンコードされて返る項目(IAM のポリシー文書など)はデコードしてからパースする。パースできない場合は元の文字列のままにする
   - API が値を返さなかった項目は `null` にする
 
@@ -172,25 +225,23 @@ AWS SDK for Rust の型は、通常 serde の `Serialize` を実装していな�
 
 | 方式 | 判断 |
 | --- | --- |
-| 自前の変換(採用) | 項目名(API の名前)、値の変換、秘密の値の伏せ方を、コレクターが確実に管理できる。手間は掛かるが、変換を補助するマクロやヘルパーを `support/` に置いて減らす |
+| 自前の変換(採用) | 項目名(API の名前)と値の変換を、コレクターが確実に管理できる。手間は掛かるが、変換を補助するマクロやヘルパーを `support/` に置いて減らす |
 | SDK の unstable な機能(`--cfg aws_sdk_unstable` などで serde を有効にする) | 不安定な機能に依存し、ワークスペース全体のビルドの設定が変わる。項目名も Rust の名前になる |
 | Smithy の生の応答(HTTP の本文) | サービスによって XML / JSON とプロトコルが違い、解析のための依存が増える。ページングの結合も自前になる |
 
-- 「すべて入れる」は、変換する時点の SDK の出力型の全項目を対象にする(秘密の値・バイナリを除く)。SDK に新しい項目が増えた場合は、変換を更新するまで入らない(項目の追加なので互換性は壊れない)
+- 「すべて入れる」は、変換する時点の SDK の出力型の全項目を対象にする(秘密の値・バイナリも含む)。SDK に新しい項目が増えた場合は、変換を更新するまで入らない(項目の追加なので互換性は壊れない)
 - 全項目を変換したかは、コレクターの機能設計書の項目の一覧とコードレビューで確かめる
 
 ### 秘密の値の扱い
 
-SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変数、EC2 の UserData、ECS のタスク定義の環境変数など)も入りえます。構成情報はスナップショット、Rego の `input`、レポートの `actual` に入るため、次の規則で伏せます。
+SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint` のメールアドレスや URL、Lambda の環境変数など)も入りえます。次のように扱います。
 
-- 秘密に当たる値の取得を目的とする API は呼ばない(読み取り専用ガードの拒否リスト。[AWS アクセス](Architecture-AWS-Access.ja.md))
-- 応答に秘密に当たる値が含まれる項目は、コレクターが明示的に伏せる。キーは残し、値を固定の文字列 `"<redacted>"` に置き換える(例: Lambda の `Environment.Variables` の各値)。キーを残すのは、「秘密らしい名前の環境変数がある」などをルールが判定できるようにするため
-- どの項目を伏せるかは、コレクターのファイル内の一覧に書き、機能設計書にも書く。伏せる項目の判断に迷う場合は伏せる
-- 認証情報そのもの(アクセスキーのシークレット、パスワード、トークン)を返す項目は、どのコレクターでも必ず伏せる
-- 伏せたことは、コレクターの出力を固定するテストで確かめる([テスト方針](Architecture-Testing-Strategy.ja.md))
-- 公開した種別で、あとから伏せる項目を足す必要が分かった場合は、**安全上の修正として、例外的に同じ種別名のまま行う**(下の「構成情報の互換性」の例外)。秘密の値を出し続けないことを優先するため
-  - リリースノートで、伏せた種別と項目を告知する
-  - その項目の値を参照するルールは、値が `"<redacted>"` に変わるため、判定が変わる影響を受けうる
+- 秘密に当たる値の取得そのものを目的とする API は呼ばない(読み取り専用ガードの拒否リスト。[AWS アクセス](Architecture-AWS-Access.ja.md))
+- それ以外の API の応答に含まれる値は、伏せずにそのまま入れる(`"<redacted>"` などへの置き換えはしない)。コレクターは情報を集めるだけで、どの値を秘密として扱うかの判断を収集に持ち込まないため(上の「コレクターの方針」)
+- 応答に含まれる値は、スナップショット、Rego の `input`、ルールが `actual` に入れた場合はレポートに、そのまま入る
+  - スナップショット: 外部に出さない。`yata collect` は書き込みの後に注意を出す(下の「書き込み(`yata collect`)」)
+  - レポート: 外部に出すときは `--omit-values` で `actual` / `expected` を省く([出力形式](Architecture-Output-Formats.ja.md) の「値の扱い」)
+- ルールの作者は、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)
 
 ### 構成情報の互換性
 
@@ -198,7 +249,6 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
 
 - 公開した(リリースに含めた)リソース種別の `configuration` は、項目の追加だけを許す
 - 名前の変更、削除、型や意味の変更は、互換性の無い変更とする
-- 伏せる項目の追加(値が `"<redacted>"` に変わる)も互換性の無い変更だが、安全上の修正として例外的に同じ種別名のまま行う(上の「秘密の値の扱い」)
 - 互換性の無い変更が必要な場合は、**新しいリソース種別名を作る**ことを原則とする(例: `aws.example.widget` を残したまま `aws.example.widget_v2` を足す)
   - 古い種別のコレクターは、移行の期間が終わるまで残し、ルールが新しい種別に移れるようにする
   - 影響がその種別を使うルールだけに限られるため。ポリシーの形式のバージョン(`format_version`)を上げると、すべてのポリシーのセットが新しい `yata` を必要とし、影響が大きい
@@ -250,7 +300,8 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
 - 収集に失敗した組には `ResourceSet` を作らず、`CollectionError` を記録する
 - グローバルなリソース種別(IAM など)は `region` を `global` にした 1 つの `ResourceSet` にする
 - 配列の順序は `id` の昇順にそろえ、出力を再現できるようにする
-- S3 のバケットは、バケットのリージョンにかかわらず 1 回の一覧で取れるが、`region` にはバケットのリージョンを入れる。どの `ResourceSet` に入れるか(グローバルとして扱うか、リージョンごとに分けるか)はコレクターの機能設計書で決める
+- S3 のバケット(`aws.s3.bucket`)は `global` の種別とし、`region` が `global` の `ResourceSet` 1 つに全バケットを入れる。各リソースの `region` にはバケットのリージョン(`ListBuckets` の `BucketRegion`)を入れる。理由は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「S3 のバケット」
+- 同じ `id` が複数のリージョンの `ResourceSet` に現れることがある(上の「id の一意性」)
 
 ### Inventory
 
@@ -374,7 +425,7 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
 - 出力先と同じ親ディレクトリに一時ディレクトリを作って書き込み、すべて書けたら名前を変えて出力先にする。`--overwrite` のときは、古いディレクトリを別の名前に移してから新しいものを出力先にし、最後に古いものを削除する
 - 書き込みの途中で失敗した場合(終了コード 3)と中断した場合(130)は、一時ディレクトリを削除し、既存の出力先は変えない
 - Unix では、ディレクトリを `0700`、ファイルを `0600` で作る。Windows では、親ディレクトリのアクセス権を引き継ぐ(未決事項を参照)
-- 書き込みが終わったら、標準エラー出力に注意を出す: スナップショットには実環境の情報(アカウント ID、ARN、SDK の応答の構成情報)が含まれること、リポジトリにコミットしたり外部に共有したりしないこと
+- 書き込みが終わったら、標準エラー出力に注意を出す: スナップショットには実環境の情報(アカウント ID、ARN、SDK の応答の構成情報。構成情報は伏せずに入っているため、機微な値を含みうる)が含まれること、リポジトリにコミットしたり外部に共有したりしないこと
 
 ### 読み込みと検証(`yata scan --snapshot`)
 
@@ -383,6 +434,7 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
   - マニフェストが無い・JSON として不正・`schema_version` が一致しない
   - マニフェストの `resource_sets` のファイルが無い、またはファイルの中身(`account`、`region`、`resource_type`、件数)がマニフェストと一致しない
   - マニフェストに無い `.json` ファイルがある
+  - `ResourceSet` の中で `id` が重複する。`regional` の種別で、リソースの `region` が `ResourceSet` の `region` と違う(上の「id の一意性」)
   - 収集の対象の組(`accounts` × リージョン × `resource_types`)のうち、`resource_sets` と `collection_errors` のどちらにも無いもの、または両方にあるものがある
   - 複数のアカウントを含む(当面は未対応)
   - ファイルの大きさ・ファイル数の上限を超える
@@ -414,6 +466,8 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
 
 - リソース種別 `<provider>.<service>.<resource>` を入れ子にして置く。ルールは `input.aws.s3.bucket` のように参照する
 - 1 つのアカウントの、全リージョンの `ResourceSet` の `resources` を、種別ごとに 1 つの配列にまとめて入れる。CIS の「全リージョンで CloudTrail が有効か」のように、リージョンをまたぐ判定ができるようにするため。各リソースは `region` を持つ
+- まとめた配列は、`id` → `region` の昇順に並べる。評価とフィクスチャとの比較を再現できるようにするため
+- 配列には、同じ `id` で `region` だけが違うリソースが並びうる(上の「id の一意性」。CloudTrail の shadow trail など)。ルールは、リソースを `id` だけでなく `id` と `region` の組で区別する必要があるかを、種別ごとに確かめる
 - `regions` には対象にしたリージョンを入れる。リージョンごとの有無を判定するルールが使う
 - 入れるのは、そのルールのメタデータの `target_type` と `related_types` の種別だけ。ルールが使うデータが明示され、フィクスチャも小さくなる
 - 宣言した種別で、収集済みの組が 0 件だった場合は空の配列を入れる。評価されたルールの `input` では、宣言した種別の配列は必ず存在する
@@ -425,8 +479,18 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
 
 - `Resource`、`ResourceSet`、`Inventory`、`AccountInfo`、`ResourceTypeInfo`、`CollectionError` の型、シリアライズ、スナップショットの読み込みと検証は `yata-core` に置く
 - スナップショットの書き込み(一時ディレクトリ、名前の変更、アクセス権)は `yata-cli` に置く
-- 種別の文字列定数、構成情報の組み立て、伏せる項目の一覧は、各コレクターのファイル(`yata-provider-aws/src/collectors/<service>/<resource>.rs`)に置く
-- 種別ごとの構成情報の形(呼ぶ API と、伏せる項目)は、そのコレクターの機能設計書(`docs/features/`)に書く
+- 種別の文字列定数と構成情報の組み立ては、各コレクターのファイル(`yata-provider-aws/src/collectors/<service>/<resource>.rs`)に置く
+- 種別ごとの構成情報の形(呼ぶ API、「設定が存在しない」に当たるエラー、`id` の形式、Blob の項目を base64 にするか構造化するか)は、そのコレクターの機能設計書(`docs/features/`)に書く
+
+## 出典
+
+- ARN の形式と、サービスごとの形式の調べ方: <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html>
+- EC2 のリソースの ARN の形式(Service Authorization Reference): <https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonec2.html>
+- CloudTrail の `DescribeTrails`(shadow trail が同じ ARN で返る): <https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_DescribeTrails.html>
+- CloudWatch Logs の `DescribeMetricFilters`(項目名が camelCase): <https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_DescribeMetricFilters.html>
+- IAM の認証情報レポート(CSV の列): <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_getting-report.html>、`GetCredentialReport`(`Content` が Blob): <https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetCredentialReport.html>
+- base64(RFC 4648): <https://www.rfc-editor.org/rfc/rfc4648>
+- `aws` CLI のパラメーターの型(Blob。出力の Blob を base64 としてデコードする例): <https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-parameters-types.html>
 
 ## 未決事項
 
@@ -439,3 +503,5 @@ SDK の応答をすべて入れると、秘密に近い値(Lambda の環境変�
 | スナップショットの Windows のアクセス権 | Windows で、作成者だけが読めるアクセス権(ACL)を設定するか。設定する場合は依存クレートの追加が要る可能性がある | スナップショットを実装する Issue |
 | スナップショットの上限の値 | ファイルの大きさ・ファイル数の上限 | スナップショットを実装する Issue |
 | 変換の補助 | SDK の型から構成情報への変換を補助するマクロ・ヘルパーの形 | 最初のコレクターを実装する Issue |
+| Blob の base64 の変換に使うクレート | [初期依存クレート](Architecture-Initial-Dependencies.ja.md) の未決事項を参照 | Blob の項目を base64 で入れる最初のコレクターを実装する Issue |
+| スナップショットの注意の文言 | `yata collect` の注意に「構成情報は伏せずに入っているため、機微な値を含みうる」を加えたが、[CLI インターフェース](Architecture-CLI-Interface.ja.md) の「スナップショット」の注意の文にはまだ無い。CLI インターフェースのページを、このページの文言に合わせる | CLI インターフェースを更新する Issue(`yata permissions` の出力の示し方を決める Issue) |

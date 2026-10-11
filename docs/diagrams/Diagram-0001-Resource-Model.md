@@ -40,6 +40,7 @@ classDiagram
         tags : optional
         configuration : JSON object keyed by API operation name
     }
+    note for Resource "Identified by (account, region, type, id). id is unique within a ResourceSet. The same id may appear in several regions (for example a multi-region CloudTrail trail)."
     class CollectionError {
         <<yata-core>>
         account
@@ -77,6 +78,7 @@ classDiagram
         <<yata-core>>
         resource_id
         resource_type
+        region : region of the resource
         operation : failed operation name
         kind
     }

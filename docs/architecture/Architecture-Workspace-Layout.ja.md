@@ -84,7 +84,7 @@ yata-cli/
 
 - CLI のサブコマンド(`yata-cli/src/cli.rs`)
 - 出力形式(`yata-report` の形式の列挙)
-- 読み取り専用ガードの例外リスト(`yata-provider-aws/src/support/` 内。原則として空)と拒否リスト(秘密の値の取得・認証情報の発行などを行う操作。[AWS アクセス](Architecture-AWS-Access.ja.md))
+- 読み取り専用ガードの例外リスト(`yata-provider-aws/src/support/` 内。Describe / List / Get で始まらないが、リソースを作成・変更・削除しない操作。内容は [AWS アクセス](Architecture-AWS-Access.ja.md) の「読み取り専用の強制」)と拒否リスト(秘密の値の取得・認証情報の発行などを行う操作。[AWS アクセス](Architecture-AWS-Access.ja.md))
 
 ### 共有ファイル
 
@@ -97,7 +97,9 @@ yata-cli/
 
 - `members = ["crates/*"]` とし、クレートの追加でルートを書き換えない
 - 依存クレートのバージョンは `[workspace.dependencies]` にまとめ、各クレートは `xxx.workspace = true` で参照する
-- AWS SDK のサービスのクレート(`aws-sdk-iam`、`aws-sdk-s3` など)は、使う予定のものを先にまとめて追加する。どのサービスを先に入れるかは、最初のルール群(CIS AWS Foundations Benchmark の対象範囲)を決める Issue で決める
+- AWS SDK のサービスのクレート(`aws-sdk-iam`、`aws-sdk-s3` など)は、使う予定のものを先にまとめて追加する。最初のルール群で使うのは、既にある `aws-sdk-sts`・`aws-sdk-ec2` と、追加する 7 つ(`aws-sdk-iam`、`aws-sdk-s3`、`aws-sdk-s3control`、`aws-sdk-cloudtrail`、`aws-sdk-cloudwatchlogs`、`aws-sdk-cloudwatch`、`aws-sdk-sns`)([初期依存クレート](Architecture-Initial-Dependencies.ja.md))
+  - ルートの `[workspace.dependencies]` への追加と、`crates/yata-provider-aws/Cargo.toml` の `[dependencies]`・`[dev-dependencies]`(各クレートの `test-util` 機能と `aws-smithy-mocks`)への追加を 1 つの PR にまとめ、`Cargo.lock` の更新を 1 回にする。サービスごとのコレクターの PR は `Cargo.toml` と `Cargo.lock` を変更しない(詳細は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「依存の入れ方」)
+  - 後から新しいサービスが必要になった場合も、コレクターの PR とは別の単独の PR で、まとめて追加する
 
 ### 実行環境
 
@@ -129,5 +131,4 @@ yata-cli/
 | 項目 | 内容 | 決める時期 |
 | --- | --- | --- |
 | 骨組みの作成 | ルートの `Cargo.toml`、空のクレート、lint 設定、CI の作成 | 実装の最初の Issue(全体の骨組み) |
-| 先に追加する AWS SDK のサービス | 最初のルール群で必要なサービスのクレートをまとめて追加する | 最初のルール群(対象とする CIS のバージョンと範囲)を決める Issue |
 | crates.io への公開 | クレート名の確保 | 最初のリリースを計画する Issue |

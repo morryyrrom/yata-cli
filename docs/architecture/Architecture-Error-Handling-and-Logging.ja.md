@@ -29,7 +29,7 @@
 | `yata-provider-aws` | `SetupError` | 認証情報が無い、`sts:GetCallerIdentity` の失敗、`aws` 以外のパーティション、リージョンの取得の失敗 | 3 |
 | `yata-provider-aws` | `CollectError` | 1 つのアカウント × リージョン × リソース種別の収集の失敗(リソースを列挙する操作の失敗) | `CollectionError` として記録して続行(4) |
 | `yata-provider-aws` | (構成情報の失敗の印) | 1 つのリソースの付随情報を取る操作の失敗 | 構成情報に `yata_error` を置いて続行。使うルールは `incomplete`(4) |
-| `yata-core` | `SnapshotError` | スナップショットの読み込み・検証の誤り(マニフェスト、`schema_version`、中身との不一致、組の過不足、複数アカウント、上限、シンボリックリンク) | 2 |
+| `yata-core` | `SnapshotError` | スナップショットの読み込み・検証の誤り(マニフェスト、`schema_version`、中身との不一致、`ResourceSet` の中の `id` の重複、`regional` の種別でのリソースと `ResourceSet` の `region` の不一致、組の過不足、複数アカウント、上限、シンボリックリンク) | 2 |
 | `yata-report` | `ReportError` | 出力の書き込みの失敗 | 3 |
 
 ## 部分的な失敗の扱い

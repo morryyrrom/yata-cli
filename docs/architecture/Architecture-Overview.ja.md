@@ -17,7 +17,8 @@ Yata Cloud は Rust 製の OSS CNAPP です。初期スコープは AWS アカ�
 
 | 原則 | 内容 |
 | --- | --- |
-| 読み取り専用 | AWS には Describe / List / Get 系の API だけを呼ぶ。実行時のガードとテストで強制する([AWS アクセス](Architecture-AWS-Access.ja.md)) |
+| 読み取り専用 | AWS には Describe / List / Get 系の API だけを呼ぶ。名前が外れるがリソースを変更しない操作は、例外リストに理由とともに載せたもの(IAM の認証情報レポートの生成)だけを許す。実行時のガードとテストで強制する([AWS アクセス](Architecture-AWS-Access.ja.md)) |
+| 収集だけのコレクター | コレクターは情報を集めるだけにし、API を既定のパラメーターで呼んで結果を絞り込まず・置き換えずに入れる。判定に向けた絞り込みはルールで行う([リソースモデル](Architecture-Resource-Model.ja.md) の「コレクターの方針」) |
 | 宣言的なルール | ルールは Rego で書き、Rust のコードと分ける([ADR: ポリシーエンジン](../adr/ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md)) |
 | 中央レジストリなし | ルールは 1 ルール 1 ファイルとし、実行時にポリシーのディレクトリを走査して見つける。収集処理は 1 リソース種別 1 ファイルとし、ビルド時に自動検出する。どちらも一覧ファイルに追記しない |
 | ポリシーの分離 | ルールはバイナリにもこのリポジトリにも含めず、別のリポジトリで配布して実行時に読み込む。互換性はポリシーのディレクトリのマニフェストで確かめる([ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md)) |
@@ -29,7 +30,7 @@ Yata Cloud は Rust 製の OSS CNAPP です。初期スコープは AWS アカ�
 
 | 用語 | 意味 |
 | --- | --- |
-| リソース(Resource) | 収集した AWS のリソース 1 件。共通の項目と、SDK が返した構成情報(`configuration`)からなる。S3 バケット、IAM ユーザー、アカウント単位の設定など |
+| リソース(Resource) | 収集した AWS のリソース 1 件。共通の項目と、SDK が返した構成情報(`configuration`)からなる。S3 バケット、IAM ユーザー、アカウント単位の設定など。アカウント・リージョン・種別・`id` の組で識別する |
 | リソース種別(resource type) | リソースの種類を表す文字列。`<provider>.<service>.<resource>` の 3 階層(例: `aws.s3.bucket`) |
 | アカウントキー(account key) | アカウントを表す文字列。`<provider>-<account_id>`(例: `aws-123456789012`) |
 | ResourceSet | アカウント × リージョン × リソース種別ごとの収集結果 |
@@ -98,7 +99,8 @@ Yata Cloud は Rust 製の OSS CNAPP です。初期スコープは AWS アカ�
 | [ポリシーエンジン: Rego(regorus)](../adr/ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md) | ルールは Rego v1 で書き、純 Rust 実装の regorus で評価する |
 | [ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md) | ルールは外部のリポジトリで配布し、実行時に読み込む。階層は自由で、1 ルール 1 ファイル(`<ルール名>.rego` + `<ルール名>.fixtures/`)。ID は `<マニフェストの name>.<ディレクトリ>.<ルール名>` でバージョンを含めない。中央の一覧を持たず、互換性はルートのマニフェスト(`yata-policies.json`)で確かめる |
 | [コレクターのビルド時自動検出](../adr/ADR-0001-Collector-Discovery-via-Build-Script.ja.md) | コレクターは 1 リソース種別 1 ファイルとし、build.rs がモジュール宣言と一覧を生成する |
-| [AWS SDK for Rust と読み取り専用ガード](../adr/ADR-0001-AWS-SDK-and-Read-Only-Guard.ja.md) | 公式の AWS SDK for Rust を使い、Describe / List / Get 以外の操作を実行時に拒否する |
+| [AWS SDK for Rust と読み取り専用ガード](../adr/ADR-0001-AWS-SDK-and-Read-Only-Guard.ja.md) | 公式の AWS SDK for Rust を使い、Describe / List / Get 以外の操作を実行時に拒否する(例外リストにある操作を除く) |
+| [読み取り専用ガードで GenerateCredentialReport を許可する](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) | IAM の認証情報レポートを使うため、`GenerateCredentialReport` を読み取り専用ガードの例外リストに加える |
 
 ## 個別機能の設計との関係
 
