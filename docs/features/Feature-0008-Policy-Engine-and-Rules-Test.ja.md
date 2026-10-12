@@ -157,7 +157,7 @@
 1. 基本のエンジンを作る(下の「regorus の設定」)
 2. `lib/` の下の `.rego` を、パスの昇順に `Engine::add_policy(相対パス, 内容)` で読み込む。戻り値のパッケージ(`data.` で始まる)が `data.yata.lib.<name>` と同じか、`data.yata.lib.<name>.` で始まらなければ `library_invalid`
 3. ライブラリごとに `data.<パッケージ>.metadata` と `data.<パッケージ>.fail` を入力なしで評価し、どちらかが定義されていれば(未定義でなければ)`library_invalid`
-4. ライブラリが 1 つ以上あれば、`eval_query("true")` を 1 回呼び、モジュール全体の解析(未定義の関数の参照など)のエラーを、ルールより先にライブラリの誤りとして見つける
+4. ライブラリが 1 つ以上あれば、`eval_query("data")` を入力なしで 1 回呼び、モジュール全体の解析(未定義の関数の参照、安全でない変数など)のエラーを、ルールより先にライブラリの誤りとして見つける。regorus はルールの本体を評価するときに解析するため、`eval_query("true")` ではこれらのエラーが出ない(P1 で確認)
 5. 構文・解析のエラーは `library_invalid`(ディレクトリ全体の失敗)
 
 - 手順 3 は、`lib/` に置き間違えたルール(定数の `metadata` や、入力が無くても空の集合として定義される `fail` を持つもの)を見つけるための検査で、入力に依存する本体の `metadata` までは見つけられない
@@ -856,6 +856,7 @@ pub enum EvaluationError {
 - 種類の enum は `serde` で snake_case の文字列にする(JSON の `kind`)
 - `PolicyLoadError` は、全体設計の [エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md) の `PolicyLoadError` に当たる。ルール単位の失敗は、`rules test` で 1 にするため、エラーの型ではなく `RuleFailure` の一覧で返す
 - 元のエラー(I/O、regorus)は、メッセージの文字列にして持つ。regorus の `anyhow::Error` を公開 API に出さないため
+- regorus のエラーのメッセージには、誤りのある行の Rego のソースの抜粋が含まれる。これはそのまま出す。抜粋されるのはポリシーのリポジトリのルール・ライブラリの本文で秘密の値ではなく、ルールを書く人が誤りの場所を見つけるのに要るため。端末に出すときの制御文字のエスケープは `yata-cli` の出力側(`sanitize.rs`)で行う
 
 ### `yata-core` に足す型
 
@@ -907,7 +908,7 @@ regorus = { version = "0.12.0", default-features = false, features = [
 
 - ワークスペースの依存で既定の機能が有効だと、メンバーのクレートでは外せないため、ルートで `default-features = false` にする
 - バージョンは今の `0.12.0` のまま変えない(無関係な依存の更新を混ぜないため)
-- 既定の機能(`coverage`、`http`、`jsonschema`、`opa-runtime`、`rvm`、`uuid`、`yaml` など)を外すため、`jsonschema`、`yaml_serde`、`uuid`、`postcard` などのクレートが `Cargo.lock` から外れる見込み
+- 既定の機能(`coverage`、`http`、`jsonschema`、`opa-runtime`、`rvm`、`uuid`、`yaml` など)を外すため、`jsonschema`、`yaml_serde`、`uuid`、`postcard` などのクレートは入らない。P1 の前は `regorus` を使うクレートが無く `Cargo.lock` に入っていなかったため、P1 では `regorus` とその依存(`verus_*` / `vstd` を含む。いずれも MIT か MIT OR Apache-2.0)が増えるだけで、外れるクレートは無い
 
 ### 各クレートの `Cargo.toml`
 
@@ -1027,6 +1028,15 @@ policies/
 | 解析のエラーの出方 | ライブラリの解析のエラー(未定義の関数の参照など)が `eval_query("true")` で出るか | ライブラリだけを読み込んだエンジンで、パッケージを `eval_rule` して確かめる |
 | `rvm` を外した構成 | `default-features = false` と上の機能の組み合わせで、`Engine` の `add_policy` / `eval_rule` / `eval_query` が使えるか、ビルドが通るか | 必要な機能を足す(足すものと理由を PR に書く) |
 | 時間の上限の効き方 | 内包表記・`every`・再帰的でない大きなループ・`walk` を含むルールが、上限で止まるか(テストで確かめる) | 止まらない書き方を、ポリシーのリポジトリのガイドに書く |
+
+P1 の実装で確かめた結果です(regorus 0.12.0)。
+
+- 時間切れのエラーの見分け: `downcast_ref::<regorus::LimitError>()` で取り出せる。代わりの方法は使わない
+- `clone()` とタイマー: タイマーの設定と `print` を集める設定は複製される
+- 未定義のルールの評価: 存在しないルールのパスを `eval_rule` すると、未定義の値ではなくエラー(`not a valid rule path`)になる。このエラーを「未定義」として扱う(ほかの用途に使われていないことを regorus のソースで確かめた)。入力に依存して定義されないルールは未定義の値になる。部分集合ルールで要素が無いときは空の集合が返る
+- 解析のエラーの出方: `eval_query("true")` では出ない。上の「ライブラリ」の手順 4 のとおり `eval_query("data")` で見つける
+- `rvm` を外した構成: `add_policy` / `eval_rule` / `eval_query` が使え、ビルドも通る。機能は足していない
+- 時間の上限の効き方: 内包表記、`every`、三重の `some ... in`、`walk` を含むルールが、いずれも上限で止まる
 
 ## 全体設計の変更
 
