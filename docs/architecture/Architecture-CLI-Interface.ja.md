@@ -9,7 +9,7 @@
 - バイナリ名は `yata`
 - 引数の解析は clap(derive)で行う
 - 結果(レポート)は標準出力、ログ・進捗・警告は標準エラー出力に書く。標準出力をパイプやファイルにそのまま渡せるようにする
-- サブコマンドは `yata-cli/src/cli.rs` に列挙し、処理は 1 サブコマンド 1 ファイル(`yata-cli/src/commands/<name>.rs`)に置く
+- サブコマンドは `yata-cli/src/cli.rs` に列挙し、処理は 1 サブコマンド 1 モジュール(`yata-cli/src/commands/<name>.rs`。必要なら `commands/<name>/` のサブモジュールに分ける)に置く
 
 ## コマンド
 
@@ -35,7 +35,7 @@
 - 環境変数を持つのは、実行する環境ごとに決まる設定(パス、ログ、色、認証のプロファイル)だけとする。1 回の実行ごとに選ぶ設定(出力形式、ルールの絞り込みなど)はオプションだけで指定する。環境変数を増やしすぎると、どの設定が効いているかが分かりにくくなるため。設定ファイルは未決事項
 - **既定値が未決の項目**
   - 既定の場所が未決の項目(`--policy-dir`)は、決まるまで「既定なし」として扱い、オプションも環境変数も無ければ終了コード 2 にする
-  - 既定の値が未決の項目(`--fail-on`、`--concurrency`、`--policy-timeout`)は、それを実装する Issue で値を決め、最初のリリースまでにこの表に反映する
+  - 既定の値が未決の項目(`--fail-on`、`--concurrency`)は、それを実装する Issue で値を決め、最初のリリースまでにこの表に反映する
 
 ### オプションと環境変数・既定値の一覧
 
@@ -52,13 +52,14 @@
 | `--concurrency <N>` | なし | 未決事項 | `scan`、`collect` |
 | `--snapshot <DIR>` | なし | なし(AWS から収集する) | `scan` |
 | `--format <table\|json\|sarif>` | なし | `table` | `scan` |
+| `--format <text\|json>` | なし | `text` | `rules test`([ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md)) |
 | `--output <FILE>` | なし | 標準出力 | `scan`、`rules list`、`permissions` |
 | `--output <DIR>` | なし | なし(必須) | `collect` |
 | `--overwrite` | なし | 無効 | `collect` |
 | `--show-passed` | なし | 無効 | `scan` |
 | `--omit-values` | なし | 無効 | `scan` |
 | `--fail-on <SEVERITY\|none>` | なし | 未決事項 | `scan` |
-| `--policy-timeout <SECONDS>` | なし | 未決事項 | `scan`、`rules test` |
+| `--policy-timeout <SECONDS>`(1〜3600 の整数) | なし | `30`(1 回の評価ごと。[ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「(b) 資源の上限」) | `scan`、`rules test` |
 
 ### ログの指定
 
@@ -159,7 +160,6 @@ AWS の認証情報とリージョンの環境変数(`AWS_ACCESS_KEY_ID`、`AWS_
 | ログの JSON 出力 | `--log-format json` を設けるか | 別 Issue |
 | `--fail-on` の既定値 | 既定を `info`(すべての検出で 1)とするか、より高い重要度とするか | CLI の `scan` を実装する Issue(メンテナーの判断が必要) |
 | `--concurrency` の既定値 | [AWS アクセス](Architecture-AWS-Access.ja.md) の未決事項 | AWS プロバイダを実装する Issue |
-| `--policy-timeout` の既定値 | [ポリシー評価](Architecture-Policy-Evaluation.ja.md) の未決事項 | ポリシーエンジンを実装する Issue |
 | 進捗表示 | 収集中の進捗を標準エラー出力に表示するか | CLI の `scan` を実装する Issue |
 | ポリシーのディレクトリの既定の場所 | 既定の場所を設けるか([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の未決事項)。決まるまでは既定なし | ポリシーのリポジトリの配布方法を決める Issue |
 | `--profile` の認証情報の限定 | `--profile` のとき、環境変数の認証情報を使わずにプロファイルの認証情報だけを使う方法(`aws-config` でプロファイルの認証情報プロバイダを明示する方法)の確認 | AWS プロバイダを実装する Issue |
