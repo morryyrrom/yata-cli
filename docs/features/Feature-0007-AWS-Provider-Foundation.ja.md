@@ -164,10 +164,11 @@
 
 - 生成された SDK のコードは、各操作の実行時の設定(`RuntimePlugin::config`)で、`ConfigBag` に操作のメタデータを入れる。例(`aws-sdk-sts` の `GetCallerIdentity`): `cfg.store_put(::aws_smithy_runtime_api::client::orchestrator::Metadata::new("GetCallerIdentity", "STS"));`
 - `Metadata` は公開の型で、`name()`(操作名)と `service()`(サービス名)を持ち、`Storable` を実装している(`StoreReplace`)。インターセプターは `cfg.load::<Metadata>()` で読める
-- ガードは `Intercept` トレイトを実装し、`read_before_execution(&self, context, cfg: &mut ConfigBag)` で判定する
-  - このフックは、実行の始めに 1 回だけ、SDK がほかの処理をする前に呼ばれる。エラーを返すと、ほかのインターセプターの同じフックを呼んだ後、残りのフックをすべて飛ばして `modify_before_completion` に進むため、シリアライズ・署名・送信は行われない
-  - 操作のメタデータは操作の実行時の設定で入り、実行時の設定はインターセプターより先に適用されるため、このフックの時点で読める
-  - 再試行は送信の段階の繰り返しで、操作は変わらないため、実行に 1 回の判定で足りる
+- ガードは `Intercept` トレイトを実装し、`read_before_serialization(&self, context, runtime_components, cfg: &mut ConfigBag)` で判定する
+  - このフックは、入力をリクエストにシリアライズする直前に、実行ごとに 1 回呼ばれる。エラーを返すと `modify_before_completion` に進み、エラーが実行の結果になるため、シリアライズ・署名・送信は行われない
+  - `read_before_execution`(実行の始めのフック)は使わない。`aws-smithy-runtime` のオーケストレーター(1.16.0 の `orchestrator.rs`)では、クライアントに付けたインターセプターの `read_before_execution` が呼ばれた後に操作の設定(操作のメタデータを含む)が適用されるため、このフックでは `Metadata` を読めない
+  - `read_before_serialization` の時点では操作の設定が適用済みで、`Metadata` を読める
+  - 再試行は送信の段階の繰り返しで、シリアライズの前のフックは実行に 1 回だけ呼ばれる。操作は変わらないため、実行に 1 回の判定で足りる
 - `Metadata` が `ConfigBag` に無い場合は拒否する(判定できないときは止める側に倒す)
 - ガードの実装に使う型は、各 SDK のクレートの `config` モジュールが再エクスポートしている(`Intercept`、`ConfigBag`、`RuntimeComponents`、`interceptors` モジュール)。`Metadata` と `BoxError` は `aws-smithy-runtime-api`(`client` 機能)から使う
 
@@ -536,7 +537,7 @@ serde_json.workspace = true
 - **判定の関数**(表のテスト): `Describe` / `List` / `Get` で始まり直後が英大文字の操作は許可、`Create` / `Put` / `Delete` / `Update` / `Start` などは拒否、`Getaway` のように直後が英大文字でないものは拒否、拒否リストの 9 項目はすべて拒否(`Get` で始まっても)、`IAM` / `GenerateCredentialReport` は許可、`IAM` / `GenerateServiceLastAccessedDetails` と、`IAM` 以外のサービス名の `GenerateCredentialReport` は拒否、メタデータが無い場合は拒否
 - **実際のクライアントでの確認**: 9 つの SDK のクライアントそれぞれを `GuardedClient` で作り、モックを付けて次を確かめる
   - 読み取りの操作 1 つ(例: STS `GetCallerIdentity`、EC2 `DescribeRegions`、IAM `ListUsers`、S3 `ListBuckets`、S3 Control `GetPublicAccessBlock`、CloudTrail `DescribeTrails`、CloudWatch Logs `DescribeMetricFilters`、CloudWatch `DescribeAlarms`、SNS `ListTopics`)がモックの応答で成功する
-  - 書き込みの操作 1 つ(例: STS `GetSessionToken`(拒否リスト)、EC2 `CreateTags`、IAM `CreateUser`、S3 `PutBucketPolicy`、S3 Control `PutPublicAccessBlock`、CloudTrail `StopLogging`、CloudWatch Logs `DeleteLogGroup`、CloudWatch `PutMetricAlarm`、SNS `Publish`)が失敗し、エラーの原因に `ReadOnlyViolation` があり、その操作のモックのルールが呼ばれていない(`num_calls() == 0`。送信の段階に進んでいない)
+  - 書き込みの操作 1 つ(例: STS `GetSessionToken`(拒否リスト)、EC2 `CreateTags`、IAM `CreateUser`、S3 `PutBucketPolicy`、S3 Control `PutPublicAccessBlock`、CloudTrail `StopLogging`、CloudWatch Logs `DeleteLogGroup`、CloudWatch `PutMetricAlarm`、SNS `Publish`)が失敗し、エラーの原因に `ReadOnlyViolation` があり、その操作が送信の段階に進んでいないこと。送信されないことは、`read_before_transmit` で操作名を記録するテスト用のインターセプターを付け、拒否した操作が記録に無いことで確かめる(`aws-smithy-mocks` のルールの `num_calls()` は、ガードより前のフックで数えられるため、この確認には使えない)。許可した操作は記録にあることも確かめる
   - S3 `GetObject`(拒否リスト)が同様に拒否される
   - IAM `GenerateCredentialReport` が許可され、`GenerateServiceLastAccessedDetails` が拒否される
   - これにより、上の「サービス名の文字列」の表の値が SDK の実際の値と合っていることも確かめる(SDK の更新で値が変わればこのテストが失敗する)
@@ -595,7 +596,7 @@ serde_json.workspace = true
 | [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md)、[ワークスペース構成](../architecture/Architecture-Workspace-Layout.ja.md)、[ADR-0005](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) | 例外リスト・拒否リストの変更は、機能の PR に混ぜず単独の PR で行う(ADR-0005 の例外の追加も単独の PR) | 例外リストへの `GenerateCredentialReport` の追加を、ガードを作るこの Issue の PR で行う。ガード自体がこの PR で初めて作られ、最初の内容として入れるため([最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) の後続の Issue 3 の「ガードがまだ無ければ P1 に含める」) | 上の「目的と背景」 |
 | [ワークスペース構成](../architecture/Architecture-Workspace-Layout.ja.md) | `support/` に認証・リージョン・読み取り専用ガードなどを置く | 認証情報・リージョンの解決とアカウント・リージョンの決定は `src/setup.rs` に置き、`support/` には複数のコレクターが使うもの(クライアントの生成、ガード、エラー、パーティション)だけを置く | コレクターから使わない準備の処理を、コレクター向けの `support/` と分けるため |
 | [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md)、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、[テスト方針](../architecture/Architecture-Testing-Strategy.ja.md)、[出力形式](../architecture/Architecture-Output-Formats.ja.md) | 秘密に当たる項目を `"<redacted>"` に伏せ、伏せる一覧をコレクターのファイルに置き、テストで確かめる。出力の `actual` にも伏せた値が出る | 基盤は伏せる仕組み・ヘルパーを用意しない。コレクターは値を伏せないため、`actual` に機微な値が入りうる(外部に出すときは `--omit-values`) | プロジェクトの規約(コレクターは収集のみ、秘密の値も伏せない)、[最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) の「コレクターの方針」 |
-| [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md) | ガードの実装方法とサービス名の文字列は未決 | `read_before_execution` で `Metadata` を読む方式に決定。サービス名は `sdkId` の表記(上の表) | 上の「読み取り専用ガード」 |
+| [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md) | ガードの実装方法とサービス名の文字列は未決 | `read_before_serialization` で `Metadata` を読む方式に決定。サービス名は `sdkId` の表記(上の表) | 上の「読み取り専用ガード」 |
 | [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md)、[CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) | `--profile` の認証情報の限定方法は未決 | `ProfileFileCredentialsProvider` を `ConfigLoader::credentials_provider` に渡す | 上の「認証情報とリージョンの解決」 |
 | [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md)、[CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) | `--concurrency` の既定値と再試行の回数は未決 | 既定値 16、再試行は SDK の既定(standard、最大 3 回の試行)を使い、コードで設定しない | 上の「並行実行」 |
 | [エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md) | エラーの種類の判定方法は未決 | 上の「エラーの種類の判定」の表。ガードが止めた操作は `service` | 上の表 |
@@ -610,7 +611,8 @@ serde_json.workspace = true
 ## 出典
 
 - 操作のメタデータ(`Metadata`。`name()`、`service()`、`Storable`): <https://docs.rs/aws-smithy-runtime-api/latest/aws_smithy_runtime_api/client/orchestrator/struct.Metadata.html>
-- インターセプター(`Intercept`。`read_before_execution` のエラー時の動き): <https://docs.rs/aws-smithy-runtime-api/latest/aws_smithy_runtime_api/client/interceptors/trait.Intercept.html>
+- インターセプター(`Intercept`。`read_before_serialization` の呼ばれる時点とエラー時の動き): <https://docs.rs/aws-smithy-runtime-api/latest/aws_smithy_runtime_api/client/interceptors/trait.Intercept.html>
+- オーケストレーターのフックと操作の設定の適用の順(`aws-smithy-runtime` 1.16.0 の `src/client/orchestrator.rs`): <https://github.com/smithy-lang/smithy-rs/blob/main/rust-runtime/aws-smithy-runtime/src/client/orchestrator.rs>
 - `aws-smithy-runtime-api` の機能(`client` は既定で無効): <https://docs.rs/crate/aws-smithy-runtime-api/latest/features>
 - SDK のクレートの `config` モジュールの再エクスポート(`Intercept`、`ConfigBag` など): <https://docs.rs/aws-sdk-sts/latest/aws_sdk_sts/config/index.html>
 - 生成された SDK のコードの `Metadata::new` の値(サービス名の文字列。リポジトリ `awslabs/aws-sdk-rust` の `sdk/<service>/src/operation/<operation>.rs`): <https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/sts/src/operation/get_caller_identity.rs>、<https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/iam/src/operation/generate_credential_report.rs>、<https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/s3control/src/operation/get_public_access_block.rs>、<https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/cloudwatchlogs/src/operation/describe_metric_filters.rs>、<https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/secretsmanager/src/operation/get_secret_value.rs>(ほかの表の値も同じ場所で確かめた)

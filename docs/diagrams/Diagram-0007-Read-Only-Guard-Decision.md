@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart TD
-    start(["Intercept read_before_execution (once per operation, before serialize, sign and send)"]) --> meta{"Metadata in ConfigBag?"}
+    start(["Intercept read_before_serialization (once per operation, after the operation config is applied, before serialize, sign and send)"]) --> meta{"Metadata in ConfigBag?"}
     meta -->|no| rm["Reject: reason is metadata missing"]
     meta -->|yes| deny{"(service, operation) in deny list?"}
     deny -->|yes| rd["Reject: reason is deny list"]
