@@ -50,3 +50,7 @@ Yata Cloud は、AWS から収集したリソースを宣言的なルールで�
 - Rego の言語仕様(OPA): <https://www.openpolicyagent.org/docs/latest/policy-language/>
 - CEL の Rust 実装: <https://github.com/cel-rust/cel-rust>
 - CEL の言語仕様: <https://github.com/google/cel-spec>
+
+## 追記
+
+- 「決定」の評価時間の上限の確認は、[ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md) で行った。`set_execution_timer_config` で `eval_rule` の評価を打ち切る方式とし(1 回の組み込み関数の呼び出しの途中では止まらない)、別スレッドで評価する方式は採らない。詳細は同ページの「評価時間の上限の実現方法」。有効にする cargo feature も同ページの「regorus の cargo feature」で決めた

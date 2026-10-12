@@ -27,7 +27,7 @@
 | `aws-sdk-cloudwatch` | `yata-provider-aws` | CloudWatch のアラームの収集 | AWS 公式 | Apache-2.0 |
 | `aws-sdk-sns` | `yata-provider-aws` | SNS のトピックと購読の収集 | AWS 公式 | Apache-2.0 |
 | `aws-smithy-runtime-api` | `yata-provider-aws` | 読み取り専用ガード(インターセプター)の実装 | AWS SDK の一部。操作のメタデータとインターセプターの型を提供する | Apache-2.0 |
-| `regorus` | `yata-engine` | Rego の評価 | 純 Rust の Rego 実装(Microsoft)。選定理由は [ADR: ポリシーエンジン](../adr/ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md) | MIT AND Apache-2.0 AND BSD-3-Clause |
+| `regorus`(`default-features = false`。`arc`、`std`、`base64`、`base64url`、`cache`、`glob`、`graph`、`hex`、`jsonpatch`、`net`、`regex`、`semver`、`time`、`urlquery`) | `yata-engine` | Rego の評価 | 純 Rust の Rego 実装(Microsoft)。選定理由は [ADR: ポリシーエンジン](../adr/ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md)。有効にする機能の理由は [ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md) の「regorus の cargo feature」 | MIT AND Apache-2.0 AND BSD-3-Clause |
 | `serde`(`derive`) | `yata-core`、`yata-report` ほか | シリアライズ | 事実上の標準 | MIT OR Apache-2.0 |
 | `serde_json` | `yata-core`、`yata-engine`、`yata-report`、`yata-provider-aws` ほか | JSON の読み書き、構成情報(`serde_json::Value`)、JSON Pointer の解釈(`Value::pointer`) | 事実上の標準 | MIT OR Apache-2.0 |
 | `tempfile` | `yata-cli` | `--output` の一時ファイル、スナップショットの一時ディレクトリ(出力先と同じ親ディレクトリに、衝突しない名前で作る) | 一時ファイル・ディレクトリを安全な名前で作り、失敗時に削除できる。開発時の依存としても使う | MIT OR Apache-2.0 |
