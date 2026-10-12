@@ -45,13 +45,11 @@ impl Rule {
     }
 
     /// The Rego package of the rule, for example `data.yata.rules.<id>`.
-    #[allow(dead_code)] // Used by the evaluation (stage P2).
     pub(crate) fn package(&self) -> String {
         package_of(&self.id)
     }
 
     /// The loaded engine. Clone it before evaluating.
-    #[allow(dead_code)] // Used by the evaluation (stage P2).
     pub(crate) fn engine(&self) -> &RegoEngine {
         &self.engine
     }

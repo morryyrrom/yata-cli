@@ -64,6 +64,7 @@ pub(crate) enum RegoValue {
 pub(crate) struct RegoEngine {
     inner: Engine,
     label: String,
+    timeout: Duration,
 }
 
 impl RegoEngine {
@@ -81,7 +82,18 @@ impl RegoEngine {
         Self {
             inner,
             label: String::new(),
+            timeout: policy_timeout,
         }
+    }
+
+    /// The evaluation time limit this engine was created with.
+    pub(crate) fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// Sets the `input` document for the following evaluations.
+    pub(crate) fn set_input(&mut self, input: serde_json::Value) {
+        self.inner.set_input(Value::from(input));
     }
 
     /// Sets the label (for example a rule ID) attached to `print` output in the logs.
