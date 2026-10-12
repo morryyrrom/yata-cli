@@ -10,6 +10,35 @@ publish = false
 
 [dependencies]
 yata-core.workspace = true
+aws-config.workspace = true
+aws-sdk-sts.workspace = true
+aws-sdk-ec2.workspace = true
+aws-sdk-iam.workspace = true
+aws-sdk-s3.workspace = true
+aws-sdk-s3control.workspace = true
+aws-sdk-cloudtrail.workspace = true
+aws-sdk-cloudwatchlogs.workspace = true
+aws-sdk-cloudwatch.workspace = true
+aws-sdk-sns.workspace = true
+aws-smithy-runtime-api = { workspace = true, features = ["client"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+aws-sdk-sts = { workspace = true, features = ["test-util"] }
+aws-sdk-ec2 = { workspace = true, features = ["test-util"] }
+aws-sdk-iam = { workspace = true, features = ["test-util"] }
+aws-sdk-s3 = { workspace = true, features = ["test-util"] }
+aws-sdk-s3control = { workspace = true, features = ["test-util"] }
+aws-sdk-cloudtrail = { workspace = true, features = ["test-util"] }
+aws-sdk-cloudwatchlogs = { workspace = true, features = ["test-util"] }
+aws-sdk-cloudwatch = { workspace = true, features = ["test-util"] }
+aws-sdk-sns = { workspace = true, features = ["test-util"] }
+aws-smithy-mocks.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["time", "test-util"] }
 
 [lints]
 workspace = true
