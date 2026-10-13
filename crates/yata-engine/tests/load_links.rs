@@ -5,7 +5,6 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
 
 use common::*;
 use yata_engine::{DirectoryFailureKind as D, LoadMode, RuleFailureKind as R};
@@ -193,6 +192,7 @@ fn symlinked_fixture_directory_without_a_rule_is_an_orphan() {
 #[cfg(windows)]
 mod junction {
     use super::*;
+    use std::path::Path;
     use std::process::Command;
 
     /// Creates a junction with `cmd /C mklink /J`.
