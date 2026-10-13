@@ -45,6 +45,15 @@ pub(crate) struct WalkedFile {
     pub(crate) path: PathBuf,
 }
 
+/// Any rule file found outside `lib/`, including the ones with invalid names and links.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WalkedRuleFile {
+    /// Path relative to the policy directory, `/`-separated.
+    pub(crate) rel_path: String,
+    /// Rule ID, when the names are valid.
+    pub(crate) id: Option<String>,
+}
+
 /// A rule file with valid names, found outside `lib/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WalkedRule {
@@ -72,6 +81,8 @@ pub(crate) enum FixtureEntryKind {
 pub(crate) struct FixtureEntry {
     /// File name (lossy for names that are not UTF-8).
     pub name: String,
+    /// File name as found on disk. Use this to read the file.
+    pub os_name: OsString,
     /// Kind of the entry. Links are never listed; they are reported as failures.
     pub kind: FixtureEntryKind,
 }
@@ -81,6 +92,8 @@ pub(crate) struct FixtureEntry {
 pub(crate) struct FixtureDir {
     /// Path of the directory relative to the policy directory, `/`-separated.
     pub path: String,
+    /// Real path of the directory on disk. Use this to read the fixtures.
+    pub os_path: PathBuf,
     /// Path of the rule file this directory belongs to, relative to the policy directory.
     pub rule_path: String,
     /// Entries in byte order of their names. Directories whose name starts with `.` are skipped.
@@ -96,6 +109,8 @@ pub(crate) struct WalkOutput {
     pub(crate) rules: Vec<WalkedRule>,
     /// Number of rule files found outside `lib/`, including the ones that failed.
     pub(crate) rule_file_count: usize,
+    /// Every rule file found outside `lib/`, in ascending path order.
+    pub(crate) rule_files: Vec<WalkedRuleFile>,
     /// Fixture directories that belong to a rule file.
     pub(crate) fixture_dirs: Vec<FixtureDir>,
     /// Rule-level failures, in walk order.
@@ -198,6 +213,7 @@ pub(crate) fn walk(
     let mut out = walker.out;
     out.libraries.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     out.rules.sort_by(|a, b| a.id.cmp(&b.id));
+    out.rule_files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     out
 }
 
@@ -327,6 +343,10 @@ impl Walker<'_> {
         if let Some(stem) = name.strip_suffix(REGO_EXTENSION) {
             self.out.rule_file_count += 1;
             let id = self.rule_id(place, stem);
+            self.out.rule_files.push(WalkedRuleFile {
+                rel_path: rel.to_string(),
+                id: id.clone(),
+            });
             self.out.rule_failures.push(WalkRuleFailure {
                 kind: RuleFailureKind::Symlink,
                 rule_id: id,
@@ -397,6 +417,10 @@ impl Walker<'_> {
             return;
         }
         self.out.rule_file_count += 1;
+        self.out.rule_files.push(WalkedRuleFile {
+            rel_path: rel.to_string(),
+            id: self.rule_id(place, stem),
+        });
         if let Some(bad) = &place.invalid_component {
             self.out.rule_failures.push(WalkRuleFailure {
                 kind: RuleFailureKind::InvalidName,
@@ -530,6 +554,7 @@ impl Walker<'_> {
                     }
                     listed.push(FixtureEntry {
                         name: display,
+                        os_name: entry.name.clone(),
                         kind: FixtureEntryKind::Directory,
                     });
                 }
@@ -537,6 +562,7 @@ impl Walker<'_> {
                     self.count_file(&item_rel)?;
                     listed.push(FixtureEntry {
                         name: display,
+                        os_name: entry.name.clone(),
                         kind: if entry.kind == Kind::File {
                             FixtureEntryKind::File
                         } else {
@@ -549,6 +575,7 @@ impl Walker<'_> {
         if rule_exists {
             self.out.fixture_dirs.push(FixtureDir {
                 path: rel,
+                os_path: self.dir_path(place),
                 rule_path: parent.rel(&format!("{stem}{REGO_EXTENSION}")),
                 entries: listed,
             });

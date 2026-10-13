@@ -14,7 +14,7 @@ use crate::limits::ResourceLimits;
 use crate::manifest;
 use crate::rule::{Rule, load_rule};
 use crate::version::YataVersion;
-use crate::walk::{self, FixtureDir};
+use crate::walk::{self, FixtureDir, WalkedRuleFile};
 
 /// What to load from a policy directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,12 +61,13 @@ pub struct PolicySet {
     info: PolicySetInfo,
     min_yata_version: String,
     rules: Vec<Rule>,
+    rule_files: Vec<WalkedRuleFile>,
     fixture_dirs: Vec<FixtureDir>,
 }
 
 impl PolicySet {
     /// The policy directory as given by the caller.
-    #[allow(dead_code)] // Used by the rule tests (stage P3).
+    #[allow(dead_code)] // Kept for diagnostics; fixtures are read through `FixtureDir::os_path`.
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
@@ -82,14 +83,17 @@ impl PolicySet {
     }
 
     /// The rules that loaded successfully, in rule ID order.
-    #[allow(dead_code)] // Used by the rule tests (stage P3).
     pub(crate) fn rules(&self) -> &[Rule] {
         &self.rules
     }
 
+    /// Every rule file found outside `lib/` (also the ones that failed to load), in path order.
+    pub(crate) fn rule_files(&self) -> &[WalkedRuleFile] {
+        &self.rule_files
+    }
+
     /// Fixture directories found next to rule files. Empty unless the mode was
     /// [`LoadMode::RulesWithFixtures`].
-    #[allow(dead_code)] // Used by the rule tests (stage P3).
     pub(crate) fn fixture_dirs(&self) -> &[FixtureDir] {
         &self.fixture_dirs
     }
@@ -313,6 +317,7 @@ fn load_dir(dir: &Path, options: &LoadOptions) -> DirOutcome {
         },
         min_yata_version: manifest.min_yata_version.clone(),
         rules,
+        rule_files: walked.rule_files,
         fixture_dirs: walked.fixture_dirs,
     });
     out
