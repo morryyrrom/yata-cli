@@ -150,6 +150,22 @@ fn one_line(message: &str) -> String {
     message.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Evaluates `fail` of `rule` on a clone of its engine with `input` and returns its elements in
+/// the engine's order.
+///
+/// Shared with the rule tests, so that fixtures and real evaluations run the same way.
+pub(crate) fn eval_fail(rule: &Rule, input: &Value) -> Result<Vec<Value>, EvaluationError> {
+    let mut engine = rule.engine().clone();
+    let limit = engine.timeout();
+    engine.set_input(input.clone());
+    match engine.eval_rule(&format!("{}.fail", rule.package())) {
+        Ok(RegoValue::Set(elements)) => Ok(elements),
+        Ok(RegoValue::Undefined | RegoValue::Json(_)) => Err(EvaluationError::FailNotSet),
+        Err(RegoFailure::Timeout) => Err(EvaluationError::Timeout { limit }),
+        Err(RegoFailure::Other(message)) => Err(EvaluationError::Engine { message }),
+    }
+}
+
 /// Evaluates one rule for one account. Returns the results and the incomplete resources.
 fn run(
     rule: &Rule,
@@ -158,15 +174,7 @@ fn run(
     declared: &[&str],
 ) -> Result<(Vec<RuleResult>, Vec<IncompleteResource>), EvaluationError> {
     let input = build_input(inventory, account, declared)?;
-    let mut engine = rule.engine().clone();
-    let limit = engine.timeout();
-    engine.set_input(input.clone());
-    let elements = match engine.eval_rule(&format!("{}.fail", rule.package())) {
-        Ok(RegoValue::Set(elements)) => elements,
-        Ok(RegoValue::Undefined | RegoValue::Json(_)) => return Err(EvaluationError::FailNotSet),
-        Err(RegoFailure::Timeout) => return Err(EvaluationError::Timeout { limit }),
-        Err(RegoFailure::Other(message)) => return Err(EvaluationError::Engine { message }),
-    };
+    let elements = eval_fail(rule, &input)?;
 
     let metadata = rule.metadata();
     let target = resources_of(&input, &metadata.target_type);

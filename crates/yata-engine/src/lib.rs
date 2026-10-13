@@ -2,7 +2,8 @@
 //! Policy engine: loads Rego policies and evaluates them against collected resources.
 //!
 //! This crate implements loading and validation of policy directories
-//! ([`load_policies`]) and the evaluation of rules ([`evaluate`]). The rule tests are added later.
+//! ([`load_policies`]), the evaluation of rules ([`evaluate`]) and the tests of rules with fixtures
+//! ([`testing::run_tests`]).
 
 mod engine_config;
 pub mod error;
@@ -17,6 +18,7 @@ mod manifest;
 mod metadata;
 pub mod names;
 mod rule;
+pub mod testing;
 pub mod version;
 mod walk;
 
