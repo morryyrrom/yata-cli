@@ -22,6 +22,7 @@ const ACCESS_DENIED_CODES: &[&str] = &[
     "AccessDeniedException",
     "UnauthorizedOperation",
     "AuthorizationError",
+    "NotAuthorized",
 ];
 
 /// Error codes that the SDK classifies as throttling.
@@ -205,6 +206,19 @@ impl CollectError {
         }
     }
 
+    /// Builds the failure mark for this error: `{"yata_error": {"kind": ..., "message": ...}}`.
+    ///
+    /// It is stored under the operation name in the resource configuration. Use it also for
+    /// failures that are not SDK errors, such as an `invalid_response` for a missing field.
+    pub(crate) fn to_failure_mark(&self) -> Value {
+        json!({
+            "yata_error": {
+                "kind": self.kind.as_str(),
+                "message": self.message,
+            }
+        })
+    }
+
     /// Returns the kind of the failure.
     pub(crate) fn kind(&self) -> CollectionErrorKind {
         self.kind
@@ -233,13 +247,7 @@ where
     E: Error + ProvideErrorMetadata + 'static,
     R: fmt::Debug + 'static,
 {
-    let error = CollectError::from_sdk(operation, err);
-    json!({
-        "yata_error": {
-            "kind": error.kind().as_str(),
-            "message": error.message(),
-        }
-    })
+    CollectError::from_sdk(operation, err).to_failure_mark()
 }
 
 #[cfg(test)]
@@ -305,6 +313,10 @@ mod tests {
             ),
             (
                 facts(Failure::Service, Some("AuthorizationError")),
+                K::AccessDenied,
+            ),
+            (
+                facts(Failure::Service, Some("NotAuthorized")),
                 K::AccessDenied,
             ),
             (facts(Failure::Service, Some("Throttling")), K::Throttled),
@@ -416,6 +428,15 @@ mod tests {
             assert_eq!(mark["yata_error"]["message"], json!(message));
             assert_eq!(mark.as_object().map(|o| o.len()), Some(1));
         }
+    }
+
+    #[test]
+    fn to_failure_mark_has_only_the_error_object() {
+        let error = CollectError::new(CollectionErrorKind::InvalidResponse, "missing field");
+        assert_eq!(
+            error.to_failure_mark(),
+            json!({"yata_error": {"kind": "invalid_response", "message": "missing field"}})
+        );
     }
 
     #[tokio::test]
