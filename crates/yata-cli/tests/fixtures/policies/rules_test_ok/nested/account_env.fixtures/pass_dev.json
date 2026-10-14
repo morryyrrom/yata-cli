@@ -1,0 +1,22 @@
+{
+  "description": "Development account",
+  "input": {
+    "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
+    "regions": ["us-east-1"],
+    "aws": {
+      "account": {
+        "account": [
+          {
+            "id": "aws-123456789012",
+            "type": "aws.account.account",
+            "account": "aws-123456789012",
+            "region": "global",
+            "tags": { "env": "dev" },
+            "configuration": {}
+          }
+        ]
+      }
+    }
+  },
+  "expected": { "fail": [] }
+}

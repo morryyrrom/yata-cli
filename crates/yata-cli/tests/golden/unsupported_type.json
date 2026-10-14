@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "tool": {
+    "name": "yata",
+    "version": "@VERSION@"
+  },
+  "result": "failed",
+  "summary": {
+    "rules": {
+      "total": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "fixtures": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "not_run": 0
+    },
+    "failures": 1
+  },
+  "policies": [
+    {
+      "name": "cli_unsupported_policies",
+      "version": "1.2.3",
+      "format_version": 1
+    }
+  ],
+  "rules": [
+    {
+      "id": "cli_unsupported_policies.unsupported_widget",
+      "policy_set": "cli_unsupported_policies",
+      "path": "unsupported_widget.rego",
+      "target_type": "aws.example.unsupported",
+      "related_types": [],
+      "status": "failed",
+      "fixtures": [
+        {
+          "file": "fail_no_owner.json",
+          "status": "passed"
+        },
+        {
+          "file": "pass_owner.json",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "failures": [
+    {
+      "kind": "unsupported_resource_type",
+      "policy_set": "cli_unsupported_policies",
+      "rule_id": "cli_unsupported_policies.unsupported_widget",
+      "path": "unsupported_widget.rego",
+      "message": "the rule declares a resource type that the provider does not support",
+      "details": {
+        "types": [
+          "aws.example.unsupported"
+        ]
+      }
+    }
+  ]
+}

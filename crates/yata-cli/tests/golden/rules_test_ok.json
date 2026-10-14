@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "tool": {
+    "name": "yata",
+    "version": "@VERSION@"
+  },
+  "result": "passed",
+  "summary": {
+    "rules": {
+      "total": 2,
+      "passed": 2,
+      "failed": 0
+    },
+    "fixtures": {
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "not_run": 0
+    },
+    "failures": 0
+  },
+  "policies": [
+    {
+      "name": "cli_ok_policies",
+      "version": "1.2.3",
+      "format_version": 1
+    }
+  ],
+  "rules": [
+    {
+      "id": "cli_ok_policies.account_flag",
+      "policy_set": "cli_ok_policies",
+      "path": "account_flag.rego",
+      "target_type": "aws.account.account",
+      "related_types": [],
+      "status": "passed",
+      "fixtures": [
+        {
+          "file": "fail_flagged.json",
+          "status": "passed"
+        },
+        {
+          "file": "pass_unflagged.json",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "id": "cli_ok_policies.nested.account_env",
+      "policy_set": "cli_ok_policies",
+      "path": "nested/account_env.rego",
+      "target_type": "aws.account.account",
+      "related_types": [],
+      "status": "passed",
+      "fixtures": [
+        {
+          "file": "fail_prod.json",
+          "status": "passed"
+        },
+        {
+          "file": "pass_dev.json",
+          "status": "passed"
+        },
+        {
+          "file": "pass_staging.json",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "failures": []
+}
