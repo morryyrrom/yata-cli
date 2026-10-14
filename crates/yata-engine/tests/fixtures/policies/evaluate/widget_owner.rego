@@ -12,26 +12,17 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some widget in input.aws.example.widget
-	not widget.tags.owner
-	finding := {
-		"resource_id": widget.id,
-		"message": sprintf("Widget %s has no owner tag", [widget.id]),
-		"path": "/tags",
-		"actual": widget.tags,
-		"expected": {"owner": "any"},
-	}
-}
+default fail := false
+
+fail if input.name == "nullish"
+
+fail if not input.tags.owner
 
 # A widget named "nullish" reports explicit null values (null is not the same as absent).
-fail contains finding if {
-	some widget in input.aws.example.widget
-	widget.name == "nullish"
-	finding := {
-		"resource_id": widget.id,
-		"message": "null values",
-		"actual": null,
-		"expected": null,
-	}
-}
+message := "null values" if {
+	input.name == "nullish"
+} else := sprintf("Widget %s has no owner tag", [input.id])
+
+reason := {"actual": null, "expected": null} if {
+	input.name == "nullish"
+} else := {"path": "/tags", "actual": input.tags, "expected": {"owner": "any"}}

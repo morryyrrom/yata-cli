@@ -11,8 +11,8 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some r in input.aws.account.account
-	r.tags.env == "prod"
-	finding := {"resource_id": r.id, "message": sprintf("Account %s is production", [r.id])}
-}
+default fail := false
+
+fail if input.tags.env == "prod"
+
+message := sprintf("Account %s is production", [input.id])

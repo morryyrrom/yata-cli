@@ -86,7 +86,7 @@ fn temp_set(name: &str) -> tempfile::TempDir {
     dir
 }
 
-/// A rule `<set>.<rel>` in the root of the set: it fails the widgets whose flag is `bad`.
+/// A rule `<set>.<name>` in the root of the set: it fails the widgets whose flag is `bad`.
 fn rule_source(set: &str, name: &str, metadata_severity: &str) -> String {
     format!(
         r#"package yata.rules.{set}.{name}
@@ -102,11 +102,11 @@ metadata := {{
 	"references": [],
 }}
 
-fail contains finding if {{
-	some r in input.aws.example.widget
-	r.tags.flag == "bad"
-	finding := {{"resource_id": r.id, "message": sprintf("Resource %s is flagged", [r.id])}}
-}}
+default fail := false
+
+fail if input.tags.flag == "bad"
+
+message := sprintf("Resource %s is flagged", [input.id])
 "#
     )
 }
@@ -121,9 +121,11 @@ fn widget(id: &str, region: &str, flag: &str) -> Value {
 fn fixture_json(widgets: Vec<Value>, fail: Value) -> String {
     serde_json::to_string_pretty(&json!({
         "description": "test",
-        "input": {
-            "account": {"account": "aws-123456789012", "id": "123456789012", "provider": "aws"},
-            "regions": ["us-east-1", "eu-west-1"],
+        "data": {
+            "yata": {"context": {
+                "account": {"account": "aws-123456789012", "id": "123456789012", "provider": "aws"},
+                "regions": ["us-east-1", "eu-west-1"]
+            }},
             "aws": {"example": {"widget": widgets}}
         },
         "expected": {"fail": fail}
@@ -175,7 +177,7 @@ fn valid_set_passes_with_string_and_object_expectations() {
     }));
 
     // `expected.fail` as an id string (every region) and as an object (one region), for a
-    // rule whose findings name the region.
+    // rule that tells the copies apart with `input.region`.
     let trail = rule(&report, "regional/trail_region.rego");
     assert_eq!(
         fixture_statuses(trail),
@@ -219,25 +221,42 @@ fn rule_failures_set_reports_every_fixture_failure_kind() {
     let report = run_one(&policies("rule_failures"), 1);
 
     let mut expected: Vec<(String, K)> = [
-        // fail_element: the rule returns a malformed element of `fail`.
+        // rule_contract: the rule breaks the rule conventions for the flagged widget.
         (
-            "fail_element/bad_path.fixtures/fail_bad.json",
+            "rule_contract/fail_conflict.fixtures/fail_bad.json",
             K::FixtureEvalError,
         ),
         (
-            "fail_element/missing_message.fixtures/fail_bad.json",
+            "rule_contract/fail_not_boolean.fixtures/fail_bad.json",
             K::FixtureEvalError,
         ),
         (
-            "fail_element/region_not_string.fixtures/fail_bad.json",
+            "rule_contract/message_conflict.fixtures/fail_bad.json",
             K::FixtureEvalError,
         ),
         (
-            "fail_element/unknown_id.fixtures/fail_bad.json",
+            "rule_contract/message_empty.fixtures/fail_bad.json",
             K::FixtureEvalError,
         ),
         (
-            "fail_element/unknown_id_region.fixtures/fail_bad.json",
+            "rule_contract/message_not_string.fixtures/fail_bad.json",
+            K::FixtureEvalError,
+        ),
+        (
+            "rule_contract/reason_bad_path.fixtures/fail_bad.json",
+            K::FixtureEvalError,
+        ),
+        (
+            "rule_contract/reason_not_object.fixtures/fail_bad.json",
+            K::FixtureEvalError,
+        ),
+        (
+            "rule_contract/reason_path_null.fixtures/fail_bad.json",
+            K::FixtureEvalError,
+        ),
+        // `fail` is undefined for the widget with a flag, which is the one in the pass_ fixture.
+        (
+            "rule_contract/undefined_at_runtime.fixtures/pass_good.json",
             K::FixtureEvalError,
         ),
         // expected: a malformed `expected.fail`.
@@ -271,7 +290,15 @@ fn rule_failures_set_reports_every_fixture_failure_kind() {
         ),
         // fixture_format
         (
+            "fixture_format/bad_context.fixtures/fail_invalid.json",
+            K::FixtureInvalid,
+        ),
+        (
             "fixture_format/bad_resource.fixtures/fail_invalid.json",
+            K::FixtureInvalid,
+        ),
+        (
+            "fixture_format/data_dup_id_region.fixtures/fail_invalid.json",
             K::FixtureInvalid,
         ),
         (
@@ -279,11 +306,11 @@ fn rule_failures_set_reports_every_fixture_failure_kind() {
             K::FixtureInvalid,
         ),
         (
-            "fixture_format/input_dup_id_region.fixtures/fail_invalid.json",
+            "fixture_format/missing_declared_type.fixtures/pass_missing_type.json",
             K::FixtureInvalid,
         ),
         (
-            "fixture_format/missing_declared_type.fixtures/pass_missing_type.json",
+            "fixture_format/old_input_key.fixtures/fail_invalid.json",
             K::FixtureInvalid,
         ),
         (
@@ -292,6 +319,10 @@ fn rule_failures_set_reports_every_fixture_failure_kind() {
         ),
         (
             "fixture_format/undeclared_type.fixtures/pass_undeclared.json",
+            K::FixtureInvalid,
+        ),
+        (
+            "fixture_format/unknown_yata_key.fixtures/fail_invalid.json",
             K::FixtureInvalid,
         ),
         (
@@ -341,29 +372,56 @@ fn rule_failures_set_reports_every_fixture_failure_kind() {
 }
 
 #[test]
-fn fixture_eval_errors_name_the_fail_element_problem() {
+fn fixture_eval_errors_name_the_rule_contract_problem() {
     let report = run_one(&policies("rule_failures"), 1);
     let cases = [
-        ("bad_path", "JSON Pointer"),
-        ("missing_message", "`message` is missing"),
-        ("region_not_string", "`resource_region` is not a string"),
-        ("unknown_id", "unknown resource"),
-        ("unknown_id_region", "unknown resource"),
+        (
+            "fail_not_boolean",
+            "fail must be a boolean, but was a string",
+        ),
+        ("fail_conflict", "rule evaluation conflict"),
+        (
+            "message_not_string",
+            "message must be a non-empty string, but was a number",
+        ),
+        (
+            "message_empty",
+            "message must be a non-empty string, but was an empty string",
+        ),
+        ("message_conflict", "rule evaluation conflict"),
+        (
+            "reason_not_object",
+            "reason must be an object, but was an array",
+        ),
+        (
+            "reason_bad_path",
+            "reason.path must be a JSON Pointer string",
+        ),
+        (
+            "reason_path_null",
+            "reason.path must be a JSON Pointer string",
+        ),
     ];
     for (name, text) in cases {
         let f = only_failure(
             &report,
-            &format!("fail_element/{name}.fixtures/fail_bad.json"),
+            &format!("rule_contract/{name}.fixtures/fail_bad.json"),
         );
         assert_eq!(f.kind, K::FixtureEvalError, "{name}");
         assert!(f.message.contains(text), "{name}: {}", f.message);
+        // The description names the resource.
+        assert!(
+            f.message.contains("(resource widget-1 in us-east-1)"),
+            "{name}: {}",
+            f.message
+        );
         assert_eq!(f.details, None);
         assert_eq!(
             f.rule_id.as_deref(),
-            Some(format!("test_policies.fail_element.{name}").as_str())
+            Some(format!("test_policies.rule_contract.{name}").as_str())
         );
-        // The fixture that does not trigger the malformed element passes.
-        let r = rule(&report, &format!("fail_element/{name}.rego"));
+        // The fixture with a widget that does not trigger the problem passes.
+        let r = rule(&report, &format!("rule_contract/{name}.rego"));
         assert_eq!(
             fixture_statuses(r),
             [
@@ -372,6 +430,28 @@ fn fixture_eval_errors_name_the_fail_element_problem() {
             ]
         );
     }
+
+    // `fail` is undefined for the widget that has a flag: the pass_ fixture fails.
+    let f = only_failure(
+        &report,
+        "rule_contract/undefined_at_runtime.fixtures/pass_good.json",
+    );
+    assert_eq!(f.kind, K::FixtureEvalError);
+    assert!(
+        f.message.contains(
+            "fail is undefined; add \"default fail := false\" (resource widget-1 in us-east-1)"
+        ),
+        "{}",
+        f.message
+    );
+    let r = rule(&report, "rule_contract/undefined_at_runtime.rego");
+    assert_eq!(
+        fixture_statuses(r),
+        [
+            ("fail_bad.json", FixtureStatus::Passed),
+            ("pass_good.json", FixtureStatus::Failed)
+        ]
+    );
 }
 
 #[test]
@@ -417,9 +497,34 @@ fn fixture_format_errors_and_directory_checks() {
     let report = run_one(&policies("rule_failures"), 1);
     let cases = [
         (
-            "input_dup_id_region",
+            "data_dup_id_region",
             "fail_invalid.json",
             "same id and region",
+        ),
+        (
+            "old_input_key",
+            "fail_invalid.json",
+            "fixture uses the old \"input\" key; rename it to \"data\" and move account and regions under data.yata.context",
+        ),
+        (
+            "bad_context",
+            "fail_invalid.json",
+            "/data/yata/context/regions is missing",
+        ),
+        (
+            "bad_context",
+            "fail_invalid.json",
+            "/data/yata/context/account/id must be a string",
+        ),
+        (
+            "bad_context",
+            "fail_invalid.json",
+            "/data/yata/context/extra is not allowed",
+        ),
+        (
+            "unknown_yata_key",
+            "fail_invalid.json",
+            "/data/yata/rules is not allowed; the only key is context",
         ),
         (
             "missing_declared_type",
@@ -448,6 +553,7 @@ fn fixture_format_errors_and_directory_checks() {
         ),
     ];
     for (name, file, text) in cases {
+        // One fixture can have several errors; they are joined into one failure.
         let f = only_failure(&report, &format!("fixture_format/{name}.fixtures/{file}"));
         assert_eq!(f.kind, K::FixtureInvalid, "{name}");
         assert!(f.message.contains(text), "{name}: {}", f.message);
@@ -514,12 +620,12 @@ fn mismatch_lists_missing_and_unexpected_resources_in_order() {
                 UnexpectedResource {
                     id: "widget-2".into(),
                     region: "eu-west-1".into(),
-                    messages: vec!["Resource widget-2 is flagged".into()],
+                    message: "Resource widget-2 is flagged".into(),
                 },
                 UnexpectedResource {
                     id: "widget-2".into(),
                     region: "us-east-1".into(),
-                    messages: vec!["Resource widget-2 is flagged".into()],
+                    message: "Resource widget-2 is flagged".into(),
                 },
             ],
         })
@@ -657,9 +763,9 @@ fn non_dummy_account_ids_are_reported_by_location_without_the_value() {
 
     // The fixtures with the number are still evaluated (and match), so it is the only failure.
     let locations = vec![
-        "/input/account/account".to_owned(),
-        "/input/account/id".to_owned(),
-        "/input/aws/example/widget/0/account".to_owned(),
+        "/data/aws/example/widget/0/account".to_owned(),
+        "/data/yata/context/account/account".to_owned(),
+        "/data/yata/context/account/id".to_owned(),
     ];
     for file in ["fail_bad.json", "pass_good.json"] {
         let f = only_failure(&report, &format!("ok/passing_rule.fixtures/{file}"));
@@ -872,7 +978,7 @@ fn json_has_the_designed_shape_and_order() {
         r#"{"kind":"fixture_mismatch","policy_set":"shape","rule_id":"shape.b","#,
         r#""path":"b.fixtures/fail_wrong.json","message":"fixture result does not match expected.fail","#,
         r#""details":{"missing":[{"id":"w1","region":"us-east-1"}],"#,
-        r#""unexpected":[{"id":"w2","region":"us-east-1","messages":["Resource w2 is flagged"]}]}},"#,
+        r#""unexpected":[{"id":"w2","region":"us-east-1","message":"Resource w2 is flagged"}]}},"#,
         r#"{"kind":"orphan_fixtures","policy_set":"shape","rule_id":null,"path":"old.fixtures","#,
         r#""message":"no rule file old.rego for this fixture directory","details":null}]}"#,
     );

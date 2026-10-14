@@ -73,7 +73,7 @@ pub(crate) fn load_libraries(
     for (rel, package) in &packages {
         for name in ["metadata", "fail"] {
             match engine.eval_rule(&format!("{package}.{name}")) {
-                Ok(RegoValue::Undefined) => {}
+                Ok(RegoValue::NoRule | RegoValue::Undefined) => {}
                 Ok(_) => {
                     return Err(invalid(
                         rel,

@@ -1,8 +1,7 @@
 {
   "description": "No widgets, so the rule ends at once",
-  "input": {
-    "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
-    "regions": ["us-east-1", "eu-west-1"],
+  "data": {
+    "yata": { "context": { "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" }, "regions": ["us-east-1", "eu-west-1"] } },
     "aws": { "example": { "widget": [] } }
   },
   "expected": { "fail": [] }

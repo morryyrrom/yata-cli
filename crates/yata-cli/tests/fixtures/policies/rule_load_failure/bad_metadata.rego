@@ -11,7 +11,8 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some r in input.aws.account.account
-	finding := {"resource_id": r.id, "message": "never evaluated"}
-}
+default fail := false
+
+fail if input.id
+
+message := "never evaluated"

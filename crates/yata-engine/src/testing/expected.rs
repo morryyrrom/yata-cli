@@ -90,7 +90,7 @@ pub(super) fn parse(elements: &[Value], errors: &mut Vec<String>) -> Vec<(usize,
     entries
 }
 
-/// The `(id, region)` pairs of the resources in a `target_type` array of the `input`.
+/// The `(id, region)` pairs of the resources in a `target_type` array of the `data`.
 ///
 /// Resources without a string `id` or `region` are left out (the format check reports them).
 pub(super) fn target_keys(target: &[Value]) -> Vec<Key> {
@@ -126,7 +126,7 @@ pub(super) fn check_targets(
         });
         if !found {
             errors.push(format!(
-                "/expected/fail/{i} matches no resource of the target type in the input"
+                "/expected/fail/{i} matches no resource of the target type in the data"
             ));
         }
     }
@@ -150,12 +150,11 @@ pub(super) fn expected_set(entries: &[(usize, ExpectedEntry)], target: &[Key]) -
 
 /// Compares the expected and the actual failing resources.
 ///
-/// `actual` maps every resource that failed to the messages of its findings. Returns `None`
-/// when the sets are equal, otherwise the details of a `fixture_mismatch`. The number of
-/// findings per resource is not compared.
+/// `actual` maps every resource that failed to the `message` of its result. Returns `None`
+/// when the sets are equal, otherwise the details of a `fixture_mismatch`.
 pub(super) fn compare(
     expected: &BTreeSet<Key>,
-    actual: &BTreeMap<Key, Vec<String>>,
+    actual: &BTreeMap<Key, String>,
 ) -> Option<FailureDetails> {
     let missing: Vec<ResourceKey> = expected
         .iter()
@@ -168,10 +167,10 @@ pub(super) fn compare(
     let unexpected: Vec<UnexpectedResource> = actual
         .iter()
         .filter(|(key, _)| !expected.contains(*key))
-        .map(|((id, region), messages)| UnexpectedResource {
+        .map(|((id, region), message)| UnexpectedResource {
             id: id.clone(),
             region: region.clone(),
-            messages: messages.clone(),
+            message: message.clone(),
         })
         .collect();
     if missing.is_empty() && unexpected.is_empty() {
@@ -309,8 +308,8 @@ mod tests {
         assert_eq!(
             errors,
             [
-                "/expected/fail/2 matches no resource of the target type in the input",
-                "/expected/fail/3 matches no resource of the target type in the input"
+                "/expected/fail/2 matches no resource of the target type in the data",
+                "/expected/fail/3 matches no resource of the target type in the data"
             ]
         );
     }
@@ -319,10 +318,10 @@ mod tests {
     fn compare_lists_missing_and_unexpected_in_ascending_order() {
         let key = |id: &str, region: &str| (id.to_owned(), region.to_owned());
         let expected: BTreeSet<Key> = [key("a", "us-east-1"), key("c", "us-east-1")].into();
-        let actual: BTreeMap<Key, Vec<String>> = [
-            (key("c", "us-east-1"), vec!["m".to_owned()]),
-            (key("b", "us-west-2"), vec!["x".to_owned(), "y".to_owned()]),
-            (key("b", "eu-west-1"), vec!["z".to_owned()]),
+        let actual: BTreeMap<Key, String> = [
+            (key("c", "us-east-1"), "m".to_owned()),
+            (key("b", "us-west-2"), "x".to_owned()),
+            (key("b", "eu-west-1"), "z".to_owned()),
         ]
         .into();
         let Some(FailureDetails::Mismatch {
@@ -344,11 +343,11 @@ mod tests {
             .map(|u| (u.id.as_str(), u.region.as_str()))
             .collect();
         assert_eq!(order, [("b", "eu-west-1"), ("b", "us-west-2")]);
-        assert_eq!(unexpected[1].messages, ["x", "y"]);
+        assert_eq!(unexpected[1].message, "x");
 
-        let same: BTreeMap<Key, Vec<String>> = [
-            (key("a", "us-east-1"), vec!["1".to_owned(), "2".to_owned()]),
-            (key("c", "us-east-1"), vec![]),
+        let same: BTreeMap<Key, String> = [
+            (key("a", "us-east-1"), "1".to_owned()),
+            (key("c", "us-east-1"), "2".to_owned()),
         ]
         .into();
         assert_eq!(compare(&expected, &same), None);

@@ -17,11 +17,10 @@ use super::report::{
 use crate::error::{
     EvaluationError, FailureDetails, PolicyLoadError, RuleFailure, RuleFailureKind,
 };
-use crate::evaluate::eval_fail;
 use crate::files::{ReadError, read_limited};
-use crate::findings::build_results;
 use crate::input::resources_of;
 use crate::loader::{LoadMode, LoadOptions, LoadedPolicies, PolicySet, load_policies};
+use crate::per_resource::evaluate_resources;
 use crate::rule::Rule;
 use crate::walk::FixtureDir;
 
@@ -285,7 +284,7 @@ fn evaluate_fixture(rule: &Rule, fixture: &Fixture) -> Option<Problem> {
             "fixture result does not match expected.fail".to_owned(),
             Some(details),
         )),
-        Err(EvaluationError::Timeout { limit }) => {
+        Err(EvaluationError::Timeout { limit, .. }) => {
             let seconds = limit.as_secs() + u64::from(limit.subsec_nanos() > 0);
             Some((
                 RuleFailureKind::FixtureTimeout,
@@ -306,26 +305,26 @@ fn timeout_message(limit: Duration) -> String {
     )
 }
 
-/// Evaluates `fail` on the fixture's input exactly as a real evaluation would, and compares the
-/// resources that failed with the expected ones.
+/// Evaluates the rule for every resource of the fixture's `data` exactly as a real evaluation
+/// would, and compares the resources that failed with the expected ones.
 fn compare_fixture(
     rule: &Rule,
     fixture: &Fixture,
 ) -> Result<Option<FailureDetails>, EvaluationError> {
     let metadata = rule.metadata();
-    let elements = eval_fail(rule, &fixture.input)?;
-    let target = resources_of(&fixture.input, &metadata.target_type);
-    let results = build_results(rule.id(), metadata.severity, &elements, target)?;
+    let results = evaluate_resources(rule, &fixture.data)?;
+    let target = resources_of(&fixture.data, &metadata.target_type);
 
-    let mut actual: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    // There is one result per resource, so each key is unique.
+    let mut actual: BTreeMap<(String, String), String> = BTreeMap::new();
     for result in results
         .into_iter()
         .filter(|r| r.status == ResultStatus::Fail)
     {
-        actual
-            .entry((result.resource.id, result.resource.region))
-            .or_default()
-            .extend(result.message);
+        actual.insert(
+            (result.resource.id, result.resource.region),
+            result.message.unwrap_or_default(),
+        );
     }
     let expected = expected_set(&fixture.expected, &target_keys(target));
     Ok(compare(&expected, &actual))

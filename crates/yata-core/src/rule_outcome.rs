@@ -65,6 +65,44 @@ impl fmt::Display for SkipReason {
     }
 }
 
+/// The kind of an evaluation error of a rule (status `error`).
+///
+/// The kind is safe to log at any level: it says what went wrong without naming resources or
+/// values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleErrorKind {
+    /// A complete rule or a function produced two different values (a Rego conflict).
+    Conflict,
+    /// The rule broke the rule conventions (for example `fail` is not a boolean).
+    Type,
+    /// The evaluation exceeded the time limit.
+    Timeout,
+    /// Any other error of the Rego engine.
+    Engine,
+    /// The input given to the engine was wrong. This should not happen.
+    Internal,
+}
+
+impl RuleErrorKind {
+    /// Returns the serialized name of the kind.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Conflict => "conflict",
+            Self::Type => "type",
+            Self::Timeout => "timeout",
+            Self::Engine => "engine",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+impl fmt::Display for RuleErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A resource whose configuration contains a failure marker (`{"yata_error": {...}}`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct IncompleteResource {
@@ -93,8 +131,18 @@ pub struct RuleOutcome {
     pub status: RuleStatus,
     /// Set only when `status` is `Skipped`.
     pub skip_reason: Option<SkipReason>,
-    /// Set only when `status` is `Error`: a one-line English description.
+    /// Set only when `status` is `Error`: a one-line English description. It may contain the
+    /// message of the Rego engine, which can contain values from the rule.
     pub error: Option<String>,
+    /// Set only when `status` is `Error`: the kind of the error. Not serialized: it is an
+    /// internal value for logs and for `--omit-values`; how reports show it is decided later.
+    #[serde(skip)]
+    pub error_kind: Option<RuleErrorKind>,
+    /// Set only when `status` is `Error`: the description without the message of the Rego
+    /// engine. It names the resource but never contains a value, so it stays when values are
+    /// omitted from a report. Not serialized, like `error_kind`.
+    #[serde(skip)]
+    pub error_summary: Option<String>,
     /// Per-resource results. Empty when `status` is `Skipped` or `Error`.
     pub results: Vec<RuleResult>,
     /// Resources that carried a failure marker. Empty when `status` is `Skipped` or `Error`.
@@ -115,6 +163,22 @@ mod tests {
             serde_json::to_value(SkipReason::CollectionFailed).unwrap(),
             serde_json::json!("collection_failed")
         );
+        assert_eq!(
+            serde_json::to_value(RuleErrorKind::Conflict).unwrap(),
+            serde_json::json!("conflict")
+        );
+        for kind in [
+            RuleErrorKind::Conflict,
+            RuleErrorKind::Type,
+            RuleErrorKind::Timeout,
+            RuleErrorKind::Engine,
+            RuleErrorKind::Internal,
+        ] {
+            assert_eq!(
+                serde_json::to_value(kind).unwrap(),
+                serde_json::json!(kind.as_str())
+            );
+        }
         assert_eq!(RuleStatus::Error.to_string(), "error");
         assert_eq!(SkipReason::NotCollected.to_string(), "not_collected");
     }

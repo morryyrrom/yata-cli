@@ -1,4 +1,7 @@
-//! Building the Rego `input` document from an [`Inventory`].
+//! Building the Rego `data` document from an [`Inventory`].
+//!
+//! The engine adds `data` once per rule and account and replaces `input` for every resource of
+//! the target type. See "Passing resources to the policy engine" in the resource model.
 
 use serde_json::{Map, Value};
 use yata_core::{AccountInfo, Inventory, Resource, RuleMetadata};
@@ -17,19 +20,25 @@ pub(crate) fn declared_types(metadata: &RuleMetadata) -> Vec<&str> {
     types
 }
 
-/// Builds the `input` of one rule for one account.
+/// Builds the `data` of one rule for one account.
 ///
-/// It has `account`, `regions` and, for every declared type, the account's resources in one array
-/// sorted by `(id, region)`, nested by `<provider>.<service>.<resource>`. A type without
-/// collected resources gets an empty array.
-pub(crate) fn build_input(
+/// `data.yata.context` has `account` and `regions`. For every declared type, the account's
+/// resources are in one array sorted by `(id, region)`, nested by
+/// `<provider>.<service>.<resource>` (for example `data.aws.s3.bucket`). A type without collected
+/// resources gets an empty array.
+pub(crate) fn build_data(
     inventory: &Inventory,
     account: &AccountInfo,
     declared: &[&str],
 ) -> Result<Value, EvaluationError> {
+    let mut context = Map::new();
+    context.insert("account".to_owned(), to_json(account)?);
+    context.insert("regions".to_owned(), to_json(&inventory.regions)?);
+    let mut yata = Map::new();
+    yata.insert("context".to_owned(), Value::Object(context));
     let mut root = Map::new();
-    root.insert("account".to_owned(), to_json(account)?);
-    root.insert("regions".to_owned(), to_json(&inventory.regions)?);
+    root.insert("yata".to_owned(), Value::Object(yata));
+
     for type_name in declared {
         let mut resources: Vec<&Resource> = inventory
             .resource_sets
@@ -47,9 +56,9 @@ pub(crate) fn build_input(
     Ok(Value::Object(root))
 }
 
-/// The array of resources of `type_name` in `input`. Empty when the type is not in the input.
-pub(crate) fn resources_of<'a>(input: &'a Value, type_name: &str) -> &'a [Value] {
-    let mut current = input;
+/// The array of resources of `type_name` in `data`. Empty when the type is not in the data.
+pub(crate) fn resources_of<'a>(data: &'a Value, type_name: &str) -> &'a [Value] {
+    let mut current = data;
     for part in type_name.split('.') {
         match current.get(part) {
             Some(next) => current = next,
@@ -84,7 +93,8 @@ fn insert_nested(root: &mut Map<String, Value>, type_name: &str, value: Value) {
 
 fn to_json<T: serde::Serialize>(value: &T) -> Result<Value, EvaluationError> {
     serde_json::to_value(value).map_err(|e| EvaluationError::Engine {
-        message: format!("cannot build the input: {e}"),
+        message: format!("cannot build the data: {e}"),
+        resource: None,
     })
 }
 
@@ -99,10 +109,10 @@ mod tests {
         let mut root = Map::new();
         insert_nested(&mut root, "aws.s3.bucket", json!([1]));
         insert_nested(&mut root, "aws.s3.other", json!([2]));
-        let input = Value::Object(root);
-        assert_eq!(resources_of(&input, "aws.s3.bucket"), [json!(1)]);
-        assert_eq!(resources_of(&input, "aws.s3.other"), [json!(2)]);
-        assert!(resources_of(&input, "aws.s3.none").is_empty());
-        assert!(resources_of(&input, "aws.iam.user").is_empty());
+        let data = Value::Object(root);
+        assert_eq!(resources_of(&data, "aws.s3.bucket"), [json!(1)]);
+        assert_eq!(resources_of(&data, "aws.s3.other"), [json!(2)]);
+        assert!(resources_of(&data, "aws.s3.none").is_empty());
+        assert!(resources_of(&data, "aws.iam.user").is_empty());
     }
 }

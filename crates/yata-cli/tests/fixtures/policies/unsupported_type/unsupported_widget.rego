@@ -11,8 +11,8 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some w in input.aws.example.unsupported
-	not w.tags.owner
-	finding := {"resource_id": w.id, "message": sprintf("Widget %s has no owner", [w.id])}
-}
+default fail := false
+
+fail if not input.tags.owner
+
+message := sprintf("Widget %s has no owner", [input.id])

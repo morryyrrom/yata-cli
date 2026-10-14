@@ -1,7 +1,8 @@
 //! Fixture directories and fixture files: names, format validation and preparation.
 //!
-//! A fixture is a JSON object with an `input` (what the rule gets) and `expected.fail` (the
-//! resources that must fail). The format is described in ADR-0001 "Policy and Fixture Layout".
+//! A fixture is a JSON object with a `data` (the Rego `data` the rule gets) and `expected.fail`
+//! (the resources that must fail). The format is described in ADR-0001 "Policy and Fixture
+//! Layout" and ADR-0030.
 //! Every message names positions as JSON Pointers and never contains a value from the fixture
 //! (keys are redacted when they look like account IDs, see `dummy`).
 
@@ -103,8 +104,8 @@ pub(super) fn check_dir(entries: &[FixtureEntry]) -> DirContents {
 /// A validated fixture, ready to be evaluated.
 #[derive(Debug)]
 pub(super) struct Fixture {
-    /// The `input`, with the arrays of the declared types sorted by `(id, region)`.
-    pub(super) input: Value,
+    /// The `data`, with the arrays of the declared types sorted by `(id, region)`.
+    pub(super) data: Value,
     /// The elements of `expected.fail`.
     pub(super) expected: Vec<(usize, ExpectedEntry)>,
 }
@@ -127,18 +128,26 @@ pub(super) fn validate(
 
     let declared = declared_types(metadata);
     let provider = metadata.target_type.split('.').next().unwrap_or_default();
+    if root.contains_key("input") {
+        errors.push(
+            "fixture uses the old \"input\" key; rename it to \"data\" and move account and regions under data.yata.context"
+                .to_owned(),
+        );
+    }
     let mut target_keys = None;
-    let input = match root.get("input") {
-        Some(Value::Object(input)) => {
-            target_keys = validate_input(input, provider, metadata, &declared, &mut errors);
-            Some(input)
+    let data = match root.get("data") {
+        Some(Value::Object(data)) => {
+            target_keys = validate_data(data, provider, metadata, &declared, &mut errors);
+            Some(data)
         }
         Some(_) => {
-            errors.push("/input must be an object".to_owned());
+            errors.push("/data must be an object".to_owned());
             None
         }
+        // The old key is reported above; do not add a second error for the same mistake.
+        None if root.contains_key("input") => None,
         None => {
-            errors.push("/input is missing".to_owned());
+            errors.push("/data is missing".to_owned());
             None
         }
     };
@@ -148,37 +157,32 @@ pub(super) fn validate(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let (Some(input), Some(entries)) = (input, entries) else {
+    let (Some(data), Some(entries)) = (data, entries) else {
         return Err(vec!["the fixture is invalid".to_owned()]);
     };
-    let mut input = Value::Object(input.clone());
-    sort_declared(&mut input, &declared);
+    let mut data = Value::Object(data.clone());
+    sort_declared(&mut data, &declared);
     Ok(Fixture {
-        input,
+        data,
         expected: entries,
     })
 }
 
-/// Validates `input`. Returns the `(id, region)` pairs of the target type array, if it is an
+/// Validates `data`. Returns the `(id, region)` pairs of the target type array, if it is an
 /// array.
-fn validate_input(
-    input: &Map<String, Value>,
+fn validate_data(
+    data: &Map<String, Value>,
     provider: &str,
     metadata: &RuleMetadata,
     declared: &[&str],
     errors: &mut Vec<String>,
 ) -> Option<Vec<expected::Key>> {
-    let account_key = validate_account(input, errors);
-    match input.get("regions") {
-        Some(Value::Array(regions)) if regions.iter().all(Value::is_string) => {}
-        Some(_) => errors.push("/input/regions must be an array of strings".to_owned()),
-        None => errors.push("/input/regions is missing".to_owned()),
-    }
+    let account_key = validate_yata(data, errors);
 
-    for key in input.keys() {
-        if !matches!(key.as_str(), "account" | "regions") && key != provider {
+    for key in data.keys() {
+        if key != "yata" && key != provider {
             errors.push(format!(
-                "/input/{} is not allowed; the keys are account, regions and {provider}",
+                "/data/{} is not allowed; the keys are yata and {provider}",
                 pointer_token(key)
             ));
         }
@@ -186,13 +190,13 @@ fn validate_input(
 
     // Resource arrays that the rule did not declare are an error: the engine passes only the
     // declared types, so a rule that forgot to declare one would pass the fixtures only.
-    if let Some(tree) = input.get(provider) {
+    if let Some(tree) = data.get(provider) {
         match tree.as_object() {
             Some(services) => {
                 for (service, resources) in services {
                     let Some(resources) = resources.as_object() else {
                         errors.push(format!(
-                            "/input/{provider}/{} must be an object",
+                            "/data/{provider}/{} must be an object",
                             pointer_token(service)
                         ));
                         continue;
@@ -201,7 +205,7 @@ fn validate_input(
                         let name = format!("{provider}.{service}.{resource}");
                         if !declared.contains(&name.as_str()) {
                             errors.push(format!(
-                                "/input/{provider}/{}/{} is a resource type that the rule does not declare in target_type or related_types",
+                                "/data/{provider}/{}/{} is a resource type that the rule does not declare in target_type or related_types",
                                 pointer_token(service),
                                 pointer_token(resource)
                             ));
@@ -209,7 +213,7 @@ fn validate_input(
                     }
                 }
             }
-            None => errors.push(format!("/input/{provider} must be an object")),
+            None => errors.push(format!("/data/{provider} must be an object")),
         }
     }
 
@@ -218,8 +222,8 @@ fn validate_input(
         let Some((p, service, resource)) = parse_resource_type(type_name) else {
             continue;
         };
-        let pointer = format!("/input/{p}/{service}/{resource}");
-        let array = input
+        let pointer = format!("/data/{p}/{service}/{resource}");
+        let array = data
             .get(p)
             .and_then(|v| v.get(service))
             .and_then(|v| v.get(resource));
@@ -241,22 +245,65 @@ fn validate_input(
     target
 }
 
-/// Validates `input.account`. Returns the account key (`input.account.account`) if it is valid.
+/// Validates `data.yata`, which holds only `context` with `account` and `regions`. Returns the
+/// account key (`data.yata.context.account.account`) if it is valid.
+fn validate_yata<'a>(data: &'a Map<String, Value>, errors: &mut Vec<String>) -> Option<&'a str> {
+    let Some(yata) = data.get("yata") else {
+        errors.push("/data/yata is missing; it holds the context (account and regions)".to_owned());
+        return None;
+    };
+    let Some(yata) = yata.as_object() else {
+        errors.push("/data/yata must be an object".to_owned());
+        return None;
+    };
+    for key in yata.keys() {
+        if key != "context" {
+            errors.push(format!(
+                "/data/yata/{} is not allowed; the only key is context",
+                pointer_token(key)
+            ));
+        }
+    }
+    let Some(context) = yata.get("context") else {
+        errors.push("/data/yata/context is missing".to_owned());
+        return None;
+    };
+    let Some(context) = context.as_object() else {
+        errors.push("/data/yata/context must be an object".to_owned());
+        return None;
+    };
+    for key in context.keys() {
+        if !matches!(key.as_str(), "account" | "regions") {
+            errors.push(format!(
+                "/data/yata/context/{} is not allowed; the keys are account and regions",
+                pointer_token(key)
+            ));
+        }
+    }
+    match context.get("regions") {
+        Some(Value::Array(regions)) if regions.iter().all(Value::is_string) => {}
+        Some(_) => errors.push("/data/yata/context/regions must be an array of strings".to_owned()),
+        None => errors.push("/data/yata/context/regions is missing".to_owned()),
+    }
+    validate_account(context, errors)
+}
+
+/// Validates `context.account`. Returns the account key if it is valid.
 fn validate_account<'a>(
-    input: &'a Map<String, Value>,
+    context: &'a Map<String, Value>,
     errors: &mut Vec<String>,
 ) -> Option<&'a str> {
-    let Some(account) = input.get("account") else {
-        errors.push("/input/account is missing".to_owned());
+    let Some(account) = context.get("account") else {
+        errors.push("/data/yata/context/account is missing".to_owned());
         return None;
     };
     let Some(account) = account.as_object() else {
-        errors.push("/input/account must be an object".to_owned());
+        errors.push("/data/yata/context/account must be an object".to_owned());
         return None;
     };
     for key in ["account", "id", "provider"] {
         if !account.get(key).is_some_and(Value::is_string) {
-            errors.push(format!("/input/account/{key} must be a string"));
+            errors.push(format!("/data/yata/context/account/{key} must be a string"));
         }
     }
     account.get("account").and_then(Value::as_str)
@@ -291,7 +338,9 @@ fn validate_resources(
         if let (Some(account), Some(expected)) = (account, account_key)
             && account != expected
         {
-            errors.push(format!("{at}/account must equal /input/account/account"));
+            errors.push(format!(
+                "{at}/account must equal /data/yata/context/account/account"
+            ));
         }
         if !resource.get("configuration").is_some_and(Value::is_object) {
             errors.push(format!("{at}/configuration must be an object"));
@@ -361,12 +410,12 @@ fn validate_expected(
 }
 
 /// Sorts the arrays of the declared types by `(id, region)`, as the real evaluation does.
-fn sort_declared(input: &mut Value, declared: &[&str]) {
+fn sort_declared(data: &mut Value, declared: &[&str]) {
     for type_name in declared {
         let Some((provider, service, resource)) = parse_resource_type(type_name) else {
             continue;
         };
-        let array = input
+        let array = data
             .get_mut(provider)
             .and_then(|v| v.get_mut(service))
             .and_then(|v| v.get_mut(resource))
@@ -431,9 +480,11 @@ mod tests {
     fn fixture(widgets: Vec<Value>, fail: Value) -> Value {
         json!({
             "description": "d",
-            "input": {
-                "account": {"account": "aws-123456789012", "id": "123456789012", "provider": "aws"},
-                "regions": ["us-east-1"],
+            "data": {
+                "yata": {"context": {
+                    "account": {"account": "aws-123456789012", "id": "123456789012", "provider": "aws"},
+                    "regions": ["us-east-1"]
+                }},
                 "aws": {"example": {"widget": widgets, "gadget": []}}
             },
             "expected": {"fail": fail}
@@ -472,7 +523,7 @@ mod tests {
             json!(["a"]),
         );
         let fx = validate(&value, &metadata(), FixtureKind::Fail).unwrap();
-        let ids: Vec<(&str, &str)> = fx.input["aws"]["example"]["widget"]
+        let ids: Vec<(&str, &str)> = fx.data["aws"]["example"]["widget"]
             .as_array()
             .unwrap()
             .iter()
@@ -495,10 +546,10 @@ mod tests {
             ["/description must be a string"]
         );
         let mut v = fixture(vec![], json!([]));
-        v.as_object_mut().unwrap().remove("input");
-        assert!(errors_of(&v, FixtureKind::Pass).contains(&"/input is missing".to_owned()));
-        v["input"] = json!([]);
-        assert!(errors_of(&v, FixtureKind::Pass).contains(&"/input must be an object".to_owned()));
+        v.as_object_mut().unwrap().remove("data");
+        assert!(errors_of(&v, FixtureKind::Pass).contains(&"/data is missing".to_owned()));
+        v["data"] = json!([]);
+        assert!(errors_of(&v, FixtureKind::Pass).contains(&"/data must be an object".to_owned()));
         let mut v = fixture(vec![], json!([]));
         v.as_object_mut().unwrap().remove("expected");
         assert_eq!(errors_of(&v, FixtureKind::Pass), ["/expected is missing"]);
@@ -528,84 +579,140 @@ mod tests {
     }
 
     #[test]
-    fn input_errors() {
+    fn data_errors() {
         let mut v = fixture(vec![], json!([]));
-        v["input"]["account"] = json!({"account": "x", "id": 5});
+        v["data"]["yata"]["context"]["account"] = json!({"account": "x", "id": 5});
         let errors = errors_of(&v, FixtureKind::Pass);
         assert_eq!(
             errors,
             [
-                "/input/account/id must be a string",
-                "/input/account/provider must be a string"
+                "/data/yata/context/account/id must be a string",
+                "/data/yata/context/account/provider must be a string"
             ]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["account"] = json!("x");
+        v["data"]["yata"]["context"]["account"] = json!("x");
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
-            ["/input/account must be an object"]
+            ["/data/yata/context/account must be an object"]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["regions"] = json!(["a", 1]);
+        v["data"]["yata"]["context"]["regions"] = json!(["a", 1]);
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
-            ["/input/regions must be an array of strings"]
+            ["/data/yata/context/regions must be an array of strings"]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"].as_object_mut().unwrap().remove("regions");
+        v["data"]["yata"]["context"]
+            .as_object_mut()
+            .unwrap()
+            .remove("regions");
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
-            ["/input/regions is missing"]
+            ["/data/yata/context/regions is missing"]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["gcp"] = json!({});
+        v["data"]["gcp"] = json!({});
         let errors = errors_of(&v, FixtureKind::Pass);
         assert_eq!(errors.len(), 1);
         assert!(
-            errors[0].starts_with("/input/gcp is not allowed"),
+            errors[0].starts_with("/data/gcp is not allowed"),
             "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn the_old_input_key_is_reported_with_the_way_to_fix_it() {
+        let mut v = fixture(vec![], json!([]));
+        let data = v.as_object_mut().unwrap().remove("data").unwrap();
+        v["input"] = data;
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            [
+                "fixture uses the old \"input\" key; rename it to \"data\" and move account and regions under data.yata.context"
+            ]
+        );
+    }
+
+    #[test]
+    fn context_and_yata_errors() {
+        let mut v = fixture(vec![], json!([]));
+        v["data"]["yata"]["extra"] = json!({});
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            ["/data/yata/extra is not allowed; the only key is context"]
+        );
+        let mut v = fixture(vec![], json!([]));
+        v["data"]["yata"]["context"]["extra"] = json!(1);
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            ["/data/yata/context/extra is not allowed; the keys are account and regions"]
+        );
+        let mut v = fixture(vec![], json!([]));
+        v["data"]["yata"] = json!([]);
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            ["/data/yata must be an object"]
+        );
+        let mut v = fixture(vec![], json!([]));
+        v["data"]["yata"] = json!({});
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            ["/data/yata/context is missing"]
+        );
+        let mut v = fixture(vec![], json!([]));
+        v["data"].as_object_mut().unwrap().remove("yata");
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            ["/data/yata is missing; it holds the context (account and regions)"]
+        );
+        let mut v = fixture(vec![], json!([]));
+        v["data"]["yata"]["context"] = json!([]);
+        assert_eq!(
+            errors_of(&v, FixtureKind::Pass),
+            ["/data/yata/context must be an object"]
         );
     }
 
     #[test]
     fn declared_and_undeclared_types() {
         let mut v = fixture(vec![], json!([]));
-        v["input"]["aws"]["example"]
+        v["data"]["aws"]["example"]
             .as_object_mut()
             .unwrap()
             .remove("gadget");
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
             [
-                "/input/aws/example/gadget is missing; the rule declares the resource type aws.example.gadget"
+                "/data/aws/example/gadget is missing; the rule declares the resource type aws.example.gadget"
             ]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["aws"]["example"]["gadget"] = json!({});
+        v["data"]["aws"]["example"]["gadget"] = json!({});
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
-            ["/input/aws/example/gadget must be an array"]
+            ["/data/aws/example/gadget must be an array"]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["aws"]["s3"] = json!({"bucket": []});
+        v["data"]["aws"]["s3"] = json!({"bucket": []});
         let errors = errors_of(&v, FixtureKind::Pass);
         assert_eq!(errors.len(), 1);
         assert!(
             errors[0].starts_with(
-                "/input/aws/s3/bucket is a resource type that the rule does not declare"
+                "/data/aws/s3/bucket is a resource type that the rule does not declare"
             )
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["aws"]["s3"] = json!([]);
+        v["data"]["aws"]["s3"] = json!([]);
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
-            ["/input/aws/s3 must be an object"]
+            ["/data/aws/s3 must be an object"]
         );
         let mut v = fixture(vec![], json!([]));
-        v["input"]["aws"] = json!([]);
+        v["data"]["aws"] = json!([]);
         let errors = errors_of(&v, FixtureKind::Pass);
         assert!(
-            errors.contains(&"/input/aws must be an object".to_owned()),
+            errors.contains(&"/data/aws must be an object".to_owned()),
             "{errors:?}"
         );
     }
@@ -623,13 +730,13 @@ mod tests {
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
             [
-                "/input/aws/example/widget/0/region must be a string",
-                "/input/aws/example/widget/0/type must be aws.example.widget",
-                "/input/aws/example/widget/0/account must equal /input/account/account",
-                "/input/aws/example/widget/0/configuration must be an object",
-                "/input/aws/example/widget/0/name must be a string when present",
-                "/input/aws/example/widget/0/tags must be an object of strings when present",
-                "/input/aws/example/widget/1 must be an object",
+                "/data/aws/example/widget/0/region must be a string",
+                "/data/aws/example/widget/0/type must be aws.example.widget",
+                "/data/aws/example/widget/0/account must equal /data/yata/context/account/account",
+                "/data/aws/example/widget/0/configuration must be an object",
+                "/data/aws/example/widget/0/name must be a string when present",
+                "/data/aws/example/widget/0/tags must be an object of strings when present",
+                "/data/aws/example/widget/1 must be an object",
             ]
         );
         // `name` and `tags` may be absent.
@@ -657,9 +764,7 @@ mod tests {
         );
         assert_eq!(
             errors_of(&v, FixtureKind::Pass),
-            [
-                "/input/aws/example/widget/2 has the same id and region as /input/aws/example/widget/0"
-            ]
+            ["/data/aws/example/widget/2 has the same id and region as /data/aws/example/widget/0"]
         );
     }
 
@@ -679,12 +784,12 @@ mod tests {
         let v = fixture(widgets.clone(), json!(["zz"]));
         assert_eq!(
             errors_of(&v, FixtureKind::Fail),
-            ["/expected/fail/0 matches no resource of the target type in the input"]
+            ["/expected/fail/0 matches no resource of the target type in the data"]
         );
         let v = fixture(widgets, json!([{"id": "a", "region": "eu-west-1"}]));
         assert_eq!(
             errors_of(&v, FixtureKind::Fail),
-            ["/expected/fail/0 matches no resource of the target type in the input"]
+            ["/expected/fail/0 matches no resource of the target type in the data"]
         );
     }
 

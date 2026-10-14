@@ -12,8 +12,8 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some r in input.aws.example.widget
-	r.tags.flag == "bad"
-	finding := {"resource_id": r.id, "message": sprintf("Resource %s is flagged", [r.id])}
-}
+default fail := false
+
+fail if input.tags.flag == "bad"
+
+message := sprintf("Resource %s is flagged", [input.id])

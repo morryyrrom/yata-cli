@@ -12,7 +12,8 @@ use std::time::{Duration, Instant, SystemTime};
 use serde_json::{Map, Value, json};
 use yata_core::{
     AccountInfo, CollectionError, CollectionErrorKind, Inventory, Resource, ResourceSet,
-    ResourceTypeInfo, ResultStatus, RuleOutcome, RuleStatus, Scope, Severity, SkipReason,
+    ResourceTypeInfo, ResultStatus, RuleErrorKind, RuleOutcome, RuleStatus, Scope, Severity,
+    SkipReason,
 };
 use yata_engine::{
     LoadMode, LoadOptions, LoadedPolicies, ResourceLimits, Rule, YataVersion, evaluate,
@@ -458,7 +459,7 @@ fn markers_of_types_the_rule_does_not_declare_are_ignored() {
     assert!(outcome.incomplete_resources.is_empty());
 }
 
-// ------------------------------------------------------------------ mapping with regions
+// ------------------------------------------------------------------ copies in several regions
 
 fn trail(id: &str, region: &str, logging: &str, scope: &str) -> Resource {
     resource(
@@ -471,7 +472,7 @@ fn trail(id: &str, region: &str, logging: &str, scope: &str) -> Resource {
 }
 
 #[test]
-fn resource_region_maps_to_one_resource_and_its_absence_to_all_copies() {
+fn copies_of_a_resource_in_several_regions_are_evaluated_separately() {
     let mut inv = base_inventory();
     put(
         &mut inv,
@@ -496,38 +497,72 @@ fn resource_region_maps_to_one_resource_and_its_absence_to_all_copies() {
     );
     let outcome = one(eval("trail_region", &inv));
     assert_eq!(outcome.status, RuleStatus::Evaluated);
+    // One result per copy, in `(id, region)` order.
     assert_eq!(
         summary(&outcome),
         [
             triple("t-1", EAST, ResultStatus::Fail),
             triple("t-1", WEST, ResultStatus::Pass),
-            // `t-2` has no `resource_region`: every copy fails, whichever one matched the body.
             triple("t-2", EAST, ResultStatus::Fail),
             triple("t-2", WEST, ResultStatus::Fail),
             triple("t-3", EAST, ResultStatus::Pass),
             triple("t-3", WEST, ResultStatus::Pass),
         ]
     );
+    // The rule tells the copies apart with `input.region`.
     assert_eq!(
         outcome.results[0].message.as_deref(),
         Some("Trail t-1 is not logging in us-east-1")
     );
     assert_eq!(
-        outcome.results[2].message.as_deref(),
-        Some("Trail t-2 is not logging anywhere")
+        outcome.results[3].message.as_deref(),
+        Some("Trail t-2 is not logging in us-west-2")
     );
     assert_eq!(outcome.results[3].resource.region, WEST);
 }
 
-// ------------------------------------------------------------------ errors
-
-fn bad_inventory() -> Inventory {
+#[test]
+fn results_are_one_per_target_resource_in_order() {
     let mut inv = base_inventory();
+    put(
+        &mut inv,
+        WEST,
+        WIDGET,
+        vec![
+            widget("w-b", WEST, Some("a")),
+            widget("w-a", WEST, Some("a")),
+        ],
+    );
     put(
         &mut inv,
         EAST,
         WIDGET,
-        vec![widget("w-1", EAST, Some("alice"))],
+        vec![widget("w-b", EAST, None), widget("w-a", EAST, Some("a"))],
+    );
+    let outcome = one(eval("widget_owner", &inv));
+    assert_eq!(
+        summary(&outcome),
+        [
+            triple("w-a", EAST, ResultStatus::Pass),
+            triple("w-a", WEST, ResultStatus::Pass),
+            triple("w-b", EAST, ResultStatus::Fail),
+            triple("w-b", WEST, ResultStatus::Pass),
+        ]
+    );
+}
+
+// ------------------------------------------------------------------ errors
+
+/// An inventory with a widget `w-1` and a widget `w-bad` named `bad`, both in the east region.
+fn bad_inventory() -> Inventory {
+    let mut inv = base_inventory();
+    let mut bad = widget("w-bad", EAST, Some("alice"));
+    bad.name = Some("bad".to_owned());
+    put(
+        &mut inv,
+        EAST,
+        WIDGET,
+        vec![widget("w-1", EAST, Some("alice")), bad],
     );
     inv
 }
@@ -543,32 +578,131 @@ fn assert_error(outcome: &RuleOutcome, needle: &str) {
 }
 
 #[test]
-fn malformed_fail_elements_make_the_rule_status_error() {
+fn rule_contract_violations_make_the_rule_status_error() {
+    // (rule, text of the description, resource it names, kind)
     let cases = [
-        ("bad.no_resource_id", "`resource_id` is missing"),
-        ("bad.no_message", "`message` is missing"),
-        ("bad.region_not_string", "`resource_region` is not a string"),
-        ("bad.region_null", "`resource_region` is not a string"),
-        ("bad.bad_path", "JSON Pointer"),
-        ("bad.not_object", "not an object"),
-        ("bad.unknown_id", "unknown resource \"no-such-widget\""),
-        ("bad.unknown_id_region", "in region \"eu-west-3\""),
+        (
+            "undefined_at_runtime",
+            "fail is undefined; add \"default fail := false\"",
+            "w-1",
+            RuleErrorKind::Type,
+        ),
+        (
+            "fail_not_boolean",
+            "fail must be a boolean, but was a string",
+            "w-1",
+            RuleErrorKind::Type,
+        ),
+        (
+            "fail_conflict",
+            "rule evaluation conflict",
+            "w-1",
+            RuleErrorKind::Conflict,
+        ),
+        (
+            "message_not_string",
+            "message must be a non-empty string, but was a number",
+            "w-bad",
+            RuleErrorKind::Type,
+        ),
+        (
+            "message_empty",
+            "message must be a non-empty string, but was an empty string",
+            "w-bad",
+            RuleErrorKind::Type,
+        ),
+        (
+            "message_conflict",
+            "rule evaluation conflict",
+            "w-bad",
+            RuleErrorKind::Conflict,
+        ),
+        (
+            "reason_not_object",
+            "reason must be an object, but was an array",
+            "w-bad",
+            RuleErrorKind::Type,
+        ),
+        (
+            "reason_bad_path",
+            "reason.path must be a JSON Pointer string",
+            "w-bad",
+            RuleErrorKind::Type,
+        ),
+        (
+            "reason_path_null",
+            "reason.path must be a JSON Pointer string",
+            "w-bad",
+            RuleErrorKind::Type,
+        ),
     ];
     let loaded = load(Duration::from_secs(30));
     let inv = bad_inventory();
-    for (name, needle) in cases {
-        let outcome = one(evaluate(&[rule(&loaded, name)], &inv));
-        assert_error(&outcome, needle);
+    for (name, text, resource, kind) in cases {
+        let outcome = one(evaluate(&[rule(&loaded, &format!("bad.{name}"))], &inv));
+        assert_error(&outcome, text);
+        assert_eq!(outcome.error_kind, Some(kind), "{name}");
+        let summary = outcome.error_summary.as_deref().unwrap();
+        assert!(summary.contains(text), "{name}: {summary}");
+        assert!(
+            summary.ends_with(&format!("(resource {resource} in {EAST})")),
+            "{name}: {summary}"
+        );
+        // The summary is what is left when the message of the engine is dropped.
+        assert!(
+            outcome.error.as_deref().unwrap().starts_with(summary),
+            "{name}"
+        );
     }
 }
 
 #[test]
-fn fail_that_is_not_a_set_makes_the_rule_status_error() {
-    // With no widget the rule's `fail` is an (empty) set; with a widget it is undefined.
-    let outcome = one(eval("fail_not_set", &base_inventory()));
-    assert_eq!(outcome.status, RuleStatus::Evaluated);
-    let outcome = one(eval("fail_not_set", &bad_inventory()));
-    assert_error(&outcome, "`fail` is not a set");
+fn the_message_of_the_engine_is_kept_apart_from_the_summary() {
+    let outcome = one(eval("bad.fail_conflict", &bad_inventory()));
+    assert_eq!(outcome.error_kind, Some(RuleErrorKind::Conflict));
+    let error = outcome.error.as_deref().unwrap();
+    let summary = outcome.error_summary.as_deref().unwrap();
+    // The full description is the summary, then the engine's message.
+    assert!(error.len() > summary.len(), "{error}");
+    assert!(error.starts_with(&format!("{summary}: ")), "{error}");
+    assert!(!summary.contains("multiple outputs"), "{summary}");
+    assert!(!summary.contains("conflicts with"), "{summary}");
+}
+
+#[test]
+fn error_descriptions_contain_no_values_from_the_rule() {
+    // `fail_not_boolean` returns the string "yes", `message_not_string` returns 5.
+    let outcome = one(eval("bad.fail_not_boolean", &bad_inventory()));
+    assert!(!outcome.error.as_deref().unwrap().contains("yes"));
+    let outcome = one(eval("bad.reason_bad_path", &bad_inventory()));
+    assert!(!outcome.error.as_deref().unwrap().contains("no-slash"));
+}
+
+#[test]
+fn message_and_reason_are_not_evaluated_for_resources_that_pass() {
+    // Only `w-1` exists, and it is not named `bad`, so the broken `message` is never used.
+    let mut inv = base_inventory();
+    put(
+        &mut inv,
+        EAST,
+        WIDGET,
+        vec![widget("w-1", EAST, Some("alice"))],
+    );
+    for name in ["bad.message_not_string", "bad.reason_not_object"] {
+        let outcome = one(eval(name, &inv));
+        assert_eq!(outcome.status, RuleStatus::Evaluated, "{name}");
+        assert_eq!(summary(&outcome), [triple("w-1", EAST, ResultStatus::Pass)]);
+        assert_eq!(outcome.error_kind, None);
+        assert_eq!(outcome.error_summary, None);
+    }
+}
+
+#[test]
+fn the_first_error_stops_the_rule_and_hides_the_other_results() {
+    // `w-1` passes, `w-bad` makes `message` fail: no result is kept.
+    let outcome = one(eval("bad.message_not_string", &bad_inventory()));
+    assert_eq!(outcome.status, RuleStatus::Error);
+    assert!(outcome.results.is_empty());
 }
 
 #[test]
@@ -583,10 +717,9 @@ fn duplicate_id_and_region_in_the_target_type_is_an_error() {
             widget("w-1", EAST, Some("b")),
         ],
     );
-    assert_error(
-        &one(eval("widget_owner", &inv)),
-        "duplicate resource \"w-1\" in region \"us-east-1\"",
-    );
+    let outcome = one(eval("widget_owner", &inv));
+    assert_error(&outcome, "duplicate resource w-1 in us-east-1");
+    assert_eq!(outcome.error_kind, Some(RuleErrorKind::Internal));
 }
 
 #[test]
@@ -602,15 +735,78 @@ fn a_rule_that_does_not_finish_in_time_is_an_error() {
     let started = Instant::now();
     let outcome = one(evaluate(&[rule(&loaded, "slow")], &inv));
     assert_error(&outcome, "timed out");
+    assert_eq!(outcome.error_kind, Some(RuleErrorKind::Timeout));
+    assert!(
+        outcome
+            .error_summary
+            .as_deref()
+            .unwrap()
+            .contains("(resource w-1 in us-east-1)")
+    );
     assert!(
         started.elapsed() < Duration::from_secs(30),
         "{:?}",
         started.elapsed()
     );
 
-    // Without a widget the same rule ends at once.
+    // Without a widget the rule is not evaluated at all.
     let outcome = one(evaluate(&[rule(&loaded, "slow")], &base_inventory()));
     assert_eq!(outcome.status, RuleStatus::Evaluated);
+}
+
+/// A widget whose evaluation by `slow_total` takes longer when `spin` is larger.
+fn spinning_widget(id: &str, spin: u64) -> Resource {
+    resource(ACCOUNT, WIDGET, id, EAST, json!({"Spin": spin}))
+}
+
+fn inventory_of_spinning_widgets(count: usize, spin: u64) -> Inventory {
+    let mut inv = base_inventory();
+    let widgets = (0..count)
+        .map(|i| spinning_widget(&format!("w-{i:04}"), spin))
+        .collect();
+    put(&mut inv, EAST, WIDGET, widgets);
+    inv
+}
+
+#[test]
+fn the_time_limit_covers_all_resources_of_a_rule_together() {
+    // Find a `spin` for which one widget takes roughly 100 ms (with a long limit).
+    let long = load(Duration::from_secs(60));
+    let mut spin = 100;
+    let per_widget = loop {
+        let inv = inventory_of_spinning_widgets(1, spin);
+        let started = Instant::now();
+        let outcome = one(evaluate(&[rule(&long, "slow_total")], &inv));
+        let elapsed = started.elapsed();
+        assert_eq!(outcome.status, RuleStatus::Evaluated);
+        if elapsed >= Duration::from_millis(100) {
+            break elapsed;
+        }
+        spin *= 2;
+        assert!(spin < 100_000_000, "the rule is too fast to calibrate");
+    };
+
+    // Each widget is far below the limit, but all of them together are well above it.
+    let limit = Duration::from_secs(2);
+    let count = usize::try_from(limit.as_millis() * 4 / per_widget.as_millis().max(1)).unwrap() + 4;
+    assert!(per_widget < limit / 2, "{per_widget:?}");
+    let short = load(limit);
+    let inv = inventory_of_spinning_widgets(count, spin);
+    let started = Instant::now();
+    let outcome = one(evaluate(&[rule(&short, "slow_total")], &inv));
+    assert_error(&outcome, "timed out");
+    assert_eq!(outcome.error_kind, Some(RuleErrorKind::Timeout));
+    assert!(
+        started.elapsed() < limit * 5,
+        "{:?} for {count} widgets",
+        started.elapsed()
+    );
+
+    // The same widgets in a smaller number fit in the limit.
+    let inv = inventory_of_spinning_widgets(2, spin);
+    let outcome = one(evaluate(&[rule(&short, "slow_total")], &inv));
+    assert_eq!(outcome.status, RuleStatus::Evaluated);
+    assert_eq!(outcome.results.len(), 2);
 }
 
 #[test]
@@ -620,7 +816,7 @@ fn an_error_in_one_rule_does_not_affect_the_others() {
     let outcomes = evaluate(
         &[
             rule(&loaded, "widget_owner"),
-            rule(&loaded, "bad.unknown_id"),
+            rule(&loaded, "bad.fail_conflict"),
         ],
         &inv,
     );
@@ -631,16 +827,16 @@ fn an_error_in_one_rule_does_not_affect_the_others() {
     assert_eq!(
         statuses,
         [
-            ("eval_policies.bad.unknown_id", RuleStatus::Error),
+            ("eval_policies.bad.fail_conflict", RuleStatus::Error),
             ("eval_policies.widget_owner", RuleStatus::Evaluated),
         ]
     );
 }
 
-// ------------------------------------------------------------------ input and ordering
+// ------------------------------------------------------------------ input and data
 
 #[test]
-fn input_has_sorted_arrays_and_only_declared_types() {
+fn input_is_the_resource_and_data_has_context_and_sorted_declared_types() {
     let mut inv = base_inventory();
     put(&mut inv, EAST, WIDGET, vec![widget("w-a", EAST, None)]);
     put(
@@ -674,14 +870,25 @@ fn input_has_sorted_arrays_and_only_declared_types() {
             triple("w-b", WEST, ResultStatus::Fail),
         ]
     );
-    let actual = outcome.results[0].actual.clone().unwrap();
+    // `input` is the resource itself, and `data` is the same for every resource.
+    let probe = |index: usize| outcome.results[index].actual.clone().unwrap();
+    assert_eq!(probe(0)["input_id"], json!("w-a"));
+    assert_eq!(probe(2)["input_id"], json!("w-b"));
     assert_eq!(
-        actual,
+        probe(0)["input_keys"],
+        json!(["account", "configuration", "id", "region", "tags", "type"])
+    );
+    let mut shared = probe(2);
+    shared.as_object_mut().unwrap().remove("input_id");
+    assert_eq!(
+        shared,
         json!({
+            "input_keys": ["account", "configuration", "id", "region", "tags", "type"],
             "account_id": "123456789012",
             "regions": [EAST, WEST],
+            "context_keys": ["account", "regions"],
             "example_keys": ["gadget", "widget"],
-            "top_keys": ["account", "aws", "regions"],
+            "service_keys": ["example"],
             "widget_order": ["w-a@us-east-1", "w-a@us-west-2", "w-b@us-west-2"],
             "gadget_count": 2,
         })
@@ -730,7 +937,7 @@ fn outcomes_are_ordered_by_rule_id_then_account_and_use_each_accounts_data() {
             (
                 "eval_policies.account_flag",
                 OTHER_ACCOUNT,
-                RuleStatus::Skipped
+                RuleStatus::Evaluated
             ),
             ("eval_policies.account_flag", ACCOUNT, RuleStatus::Evaluated),
             ("eval_policies.account_flag", third, RuleStatus::Evaluated),
@@ -826,21 +1033,54 @@ fn print_output_goes_to_the_debug_log_with_the_rule_id() {
 }
 
 #[test]
-fn a_fail_value_that_is_not_a_set_is_an_error() {
-    // Each rule's `fail` is a set without widgets and a string / an array with one.
-    let loaded = load(Duration::from_secs(30));
-    for name in ["fail_string", "fail_array"] {
-        let ok = one(evaluate(&[rule(&loaded, name)], &base_inventory()));
-        assert_eq!(ok.status, RuleStatus::Evaluated, "{name}");
-        let outcome = one(evaluate(&[rule(&loaded, name)], &bad_inventory()));
-        assert_error(&outcome, "`fail` is not a set");
-    }
-}
-#[test]
 fn evaluating_twice_gives_the_same_outcomes() {
     let loaded = load(Duration::from_secs(30));
     let mut inv = base_inventory();
     put(&mut inv, EAST, WIDGET, vec![widget("w-1", EAST, None)]);
     let rules = [rule(&loaded, "widget_owner")];
     assert_eq!(evaluate(&rules, &inv), evaluate(&rules, &inv));
+}
+
+#[test]
+fn the_title_is_the_message_when_the_rule_has_no_message() {
+    let mut inv = base_inventory();
+    let mut flagged = widget("w-2", EAST, None);
+    flagged.tags.insert("flag".to_owned(), "bad".to_owned());
+    put(
+        &mut inv,
+        EAST,
+        WIDGET,
+        vec![widget("w-1", EAST, None), flagged],
+    );
+    let outcome = one(eval("title_only", &inv));
+    assert_eq!(outcome.status, RuleStatus::Evaluated);
+    let fail = &outcome.results[1];
+    assert_eq!(fail.status, ResultStatus::Fail);
+    assert_eq!(fail.message.as_deref(), Some("Widget must not be flagged"));
+    // Without `reason` there is no path, actual or expected.
+    assert_eq!(
+        (&fail.path, &fail.actual, &fail.expected),
+        (&None, &None, &None)
+    );
+    assert_eq!(outcome.results[0].message, None);
+}
+
+#[test]
+fn the_account_type_is_always_collected_and_is_in_data_and_as_the_target() {
+    // The inventory declares no collection error and `account_flag` targets
+    // `aws.account.account`: one result for the single account resource.
+    let mut inv = base_inventory();
+    // Even without a resource type entry the account type is treated as collected.
+    inv.resource_types
+        .retain(|t| t.resource_type != ACCOUNT_TYPE);
+    let outcome = one(eval("account_flag", &inv));
+    assert_eq!(outcome.status, RuleStatus::Evaluated, "{outcome:?}");
+    assert_eq!(
+        summary(&outcome),
+        [triple(
+            "aws.account.account:123456789012:global",
+            "global",
+            ResultStatus::Pass
+        )]
+    );
 }

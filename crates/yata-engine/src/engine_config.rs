@@ -51,12 +51,40 @@ macro_rules! failure {
 /// The result of evaluating a rule path.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RegoValue {
-    /// The path is not defined.
+    /// No rule has this path (regorus reports `not a valid rule path`).
+    NoRule,
+    /// The rule exists but is undefined for the current input.
     Undefined,
+    /// A boolean.
+    Bool(bool),
     /// A set, with its elements in the engine's order.
     Set(Vec<serde_json::Value>),
     /// Any other value.
     Json(serde_json::Value),
+}
+
+impl RegoValue {
+    /// The name of the type of the value, for messages. It never contains the value itself.
+    pub(crate) fn type_name(&self) -> &'static str {
+        match self {
+            Self::NoRule | Self::Undefined => "undefined",
+            Self::Bool(_) => "boolean",
+            Self::Set(_) => "set",
+            Self::Json(v) => json_type_name(v),
+        }
+    }
+}
+
+/// The name of the JSON type of `value`, for messages.
+pub(crate) fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
 }
 
 /// A Rego engine with the Yata configuration. Cloning copies the loaded modules and settings.
@@ -64,7 +92,10 @@ pub(crate) enum RegoValue {
 pub(crate) struct RegoEngine {
     inner: Engine,
     label: String,
+    resource: String,
     timeout: Duration,
+    /// The document given to [`RegoEngine::set_data`], kept to take `input` documents from it.
+    data: Option<Value>,
 }
 
 impl RegoEngine {
@@ -82,7 +113,9 @@ impl RegoEngine {
         Self {
             inner,
             label: String::new(),
+            resource: String::new(),
             timeout: policy_timeout,
+            data: None,
         }
     }
 
@@ -91,14 +124,59 @@ impl RegoEngine {
         self.timeout
     }
 
-    /// Sets the `input` document for the following evaluations.
-    pub(crate) fn set_input(&mut self, input: serde_json::Value) {
-        self.inner.set_input(Value::from(input));
+    /// Sets the time limit of the following `eval_rule` calls.
+    ///
+    /// Each `eval_rule` call starts its own timer, so the caller sets the remaining time before
+    /// every call to enforce one limit over many calls. This replaces the settings only and does
+    /// not make the engine prepare its modules again.
+    pub(crate) fn set_time_limit(&mut self, limit: Duration) {
+        let check_interval = NonZeroU32::new(TIMER_CHECK_INTERVAL).unwrap_or(NonZeroU32::MIN);
+        self.inner.set_execution_timer_config(ExecutionTimerConfig {
+            limit,
+            check_interval,
+        });
+    }
+
+    /// Adds the `data` document, which must be a JSON object. The engine prepares its modules
+    /// again at the next evaluation, so this is called once per rule and account.
+    pub(crate) fn set_data(&mut self, data: &serde_json::Value) -> Result<(), RegoFailure> {
+        let value = Value::from(data.clone());
+        self.inner
+            .add_data(value.clone())
+            .map_err(|e| failure!(e))?;
+        self.data = Some(value);
+        Ok(())
+    }
+
+    /// Sets `input` to the `index`-th element of the array of `type_name` (for example
+    /// `aws.s3.bucket`) in the document given to [`RegoEngine::set_data`]. The element is shared
+    /// with the data, not copied. Returns `false` and leaves `input` unchanged when there is no
+    /// such element.
+    pub(crate) fn set_input_from_data(&mut self, type_name: &str, index: usize) -> bool {
+        let Some(data) = &self.data else {
+            return false;
+        };
+        let mut current = data;
+        for part in type_name.split('.') {
+            current = &current[part];
+        }
+        let element = &current[index];
+        if matches!(element, Value::Undefined) {
+            return false;
+        }
+        self.inner.set_input(element.clone());
+        true
     }
 
     /// Sets the label (for example a rule ID) attached to `print` output in the logs.
     pub(crate) fn set_label(&mut self, label: &str) {
         self.label = label.to_string();
+    }
+
+    /// Sets the ID of the resource being evaluated, attached to `print` output in the logs.
+    pub(crate) fn set_resource(&mut self, id: &str) {
+        self.resource.clear();
+        self.resource.push_str(id);
     }
 
     /// Parses a module. Returns its package, for example `data.yata.rules.p.r`.
@@ -115,11 +193,12 @@ impl RegoEngine {
         let value = match result {
             Ok(v) => v,
             // regorus reports a path that is not a rule of any loaded module this way.
-            Err(e) if e.to_string() == UNKNOWN_RULE_PATH => return Ok(RegoValue::Undefined),
+            Err(e) if e.to_string() == UNKNOWN_RULE_PATH => return Ok(RegoValue::NoRule),
             Err(e) => return Err(failure!(e)),
         };
         Ok(match value {
             Value::Undefined => RegoValue::Undefined,
+            Value::Bool(b) => RegoValue::Bool(b),
             Value::Set(set) => {
                 let mut elements = Vec::with_capacity(set.len());
                 for v in set.iter() {
@@ -144,7 +223,7 @@ impl RegoEngine {
     fn log_prints(&mut self) {
         if let Ok(prints) = self.inner.take_prints() {
             for line in prints {
-                tracing::debug!(target: "yata_engine::rego_print", rule = %self.label, "{line}");
+                tracing::debug!(target: "yata_engine::rego_print", rule = %self.label, resource = %self.resource, "{line}");
             }
         }
     }
@@ -202,16 +281,13 @@ mod tests {
     }
 
     #[test]
-    fn unknown_rule_paths_are_undefined_and_empty_partial_sets_are_empty_sets() {
+    fn unknown_rule_paths_have_no_rule_and_empty_partial_sets_are_empty_sets() {
         let mut e = engine_with(
             "package t\nimport rego.v1\nfail contains 1 if { input.never }\nf(x) := x\nneeds_input := input.x\n",
         );
         assert_eq!(e.eval_rule("data.t.fail"), Ok(RegoValue::Set(vec![])));
-        assert_eq!(e.eval_rule("data.t.metadata"), Ok(RegoValue::Undefined));
-        assert_eq!(
-            e.eval_rule("data.nothing.metadata"),
-            Ok(RegoValue::Undefined)
-        );
+        assert_eq!(e.eval_rule("data.t.metadata"), Ok(RegoValue::NoRule));
+        assert_eq!(e.eval_rule("data.nothing.metadata"), Ok(RegoValue::NoRule));
         assert_eq!(e.eval_rule("data.t.needs_input"), Ok(RegoValue::Undefined));
     }
 
@@ -246,5 +322,156 @@ mod tests {
             e.add_policy("t.rego", "package t\nx := (\n"),
             Err(RegoFailure::Other(_))
         ));
+    }
+    // The tests below check the assumptions of the per-resource evaluation (ADR-0030) against
+    // regorus: see "Implementation checks" in Feature-0008.
+
+    fn data_doc() -> serde_json::Value {
+        serde_json::json!({
+            "yata": {"context": {"regions": ["us-east-1", "eu-west-1"], "account": {"id": "123456789012"}}},
+            "aws": {"example": {"widget": [
+                {"id": "a", "region": "us-east-1", "n": 1},
+                {"id": "b", "region": "us-east-1", "n": 2}
+            ]}}
+        })
+    }
+
+    fn engine_with_rule_and_library(rule: &str) -> RegoEngine {
+        let mut e = RegoEngine::new(Duration::from_secs(30));
+        e.add_policy(
+            "lib/helpers.rego",
+            "package yata.lib.p.helpers\nimport rego.v1\nis_big(r) if r.n > 1\n",
+        )
+        .unwrap();
+        e.add_policy("r.rego", rule).unwrap();
+        e
+    }
+
+    const RULE: &str = "package yata.rules.p.r\nimport rego.v1\nimport data.yata.lib.p.helpers\n\ndefault fail := false\nfail if helpers.is_big(input)\nregions := count(data.yata.context.regions)\nmessage := sprintf(\"%s in %d regions\", [input.id, regions])\n";
+
+    #[test]
+    fn data_yata_context_coexists_with_rule_and_library_packages() {
+        let mut e = engine_with_rule_and_library(RULE);
+        e.set_data(&data_doc()).unwrap();
+        assert!(e.set_input_from_data("aws.example.widget", 1));
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.fail"),
+            Ok(RegoValue::Bool(true))
+        );
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.message"),
+            Ok(RegoValue::Json(serde_json::json!("b in 2 regions")))
+        );
+        // The base documents are intact next to the modules.
+        let all = e
+            .inner
+            .eval_query("data.yata.context.regions".to_string(), false);
+        assert!(all.is_ok());
+        assert!(!e.set_input_from_data("aws.example.widget", 2));
+        assert!(!e.set_input_from_data("aws.example.nothing", 0));
+    }
+
+    #[test]
+    fn set_input_replaces_the_input_and_leaves_no_state_between_evaluations() {
+        let mut e = engine_with_rule_and_library(
+            "package yata.rules.p.r\nimport rego.v1\ndefault fail := false\nfail if input.n > 1\nhelper := input.id\nmessage := helper\nviaw := x if { x := input.id with input as {\"id\": \"overridden\"} }\n",
+        );
+        e.set_data(&data_doc()).unwrap();
+        for (index, want_fail, want_id) in [(1, true, "b"), (0, false, "a"), (1, true, "b")] {
+            assert!(e.set_input_from_data("aws.example.widget", index));
+            assert_eq!(
+                e.eval_rule("data.yata.rules.p.r.fail"),
+                Ok(RegoValue::Bool(want_fail))
+            );
+            // Rule values of the previous resource do not stay.
+            assert_eq!(
+                e.eval_rule("data.yata.rules.p.r.message"),
+                Ok(RegoValue::Json(serde_json::json!(want_id)))
+            );
+            // `with input as` still replaces the input inside the rule.
+            assert_eq!(
+                e.eval_rule("data.yata.rules.p.r.viaw"),
+                Ok(RegoValue::Json(serde_json::json!("overridden")))
+            );
+        }
+    }
+
+    #[test]
+    fn default_gives_false_and_a_missing_message_is_no_rule() {
+        let mut e = engine_with_rule_and_library(
+            "package yata.rules.p.r\nimport rego.v1\ndefault fail := false\nfail if input.n > 100\n",
+        );
+        e.set_data(&data_doc()).unwrap();
+        assert!(e.set_input_from_data("aws.example.widget", 0));
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.fail"),
+            Ok(RegoValue::Bool(false))
+        );
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.message"),
+            Ok(RegoValue::NoRule)
+        );
+        // Without `default`, a body that does not hold is undefined, not false.
+        let mut e = engine_with_rule_and_library(
+            "package yata.rules.p.r\nimport rego.v1\nfail if input.n > 100\nmessage := input.nothing\n",
+        );
+        e.set_data(&data_doc()).unwrap();
+        assert!(e.set_input_from_data("aws.example.widget", 0));
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.fail"),
+            Ok(RegoValue::Undefined)
+        );
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.message"),
+            Ok(RegoValue::Undefined)
+        );
+    }
+
+    #[test]
+    fn conflicts_are_engine_errors_and_not_timeouts() {
+        let mut e = engine_with_rule_and_library(
+            "package yata.rules.p.r\nimport rego.v1\ndefault fail := false\nfail if true\nmessage := \"one\" if input.n > 0\nmessage := \"two\" if input.n > 0\nf(x) := 1 if x > 0\nf(x) := 2 if x > 0\nviaf := f(input.n)\n",
+        );
+        e.set_data(&data_doc()).unwrap();
+        assert!(e.set_input_from_data("aws.example.widget", 0));
+        for rule in ["message", "viaf"] {
+            let result = e.eval_rule(&format!("data.yata.rules.p.r.{rule}"));
+            let Err(RegoFailure::Other(message)) = result else {
+                panic!("expected an engine error for {rule}, got {result:?}");
+            };
+            assert!(
+                message.contains("multiple outputs") || message.contains("rule conflicts with"),
+                "{rule}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_time_limit_can_be_set_again_between_evaluations_without_preparing_again() {
+        let slow = "package yata.rules.p.r\nimport rego.v1\ndefault fail := false\nfail if { some i in numbers.range(1, 3000); some j in numbers.range(1, 3000); some k in numbers.range(1, 3000); i + j + k < 0 }\n";
+        let mut e = engine_with_rule_and_library(slow);
+        e.set_data(&data_doc()).unwrap();
+        assert!(e.set_input_from_data("aws.example.widget", 0));
+        for limit in [Duration::from_millis(50), Duration::from_millis(120)] {
+            e.set_time_limit(limit);
+            let start = Instant::now();
+            assert_eq!(
+                e.eval_rule("data.yata.rules.p.r.fail"),
+                Err(RegoFailure::Timeout)
+            );
+            let elapsed = start.elapsed();
+            assert!(elapsed >= limit, "{elapsed:?} < {limit:?}");
+            assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
+        }
+        // A long limit does not stop a fast evaluation, and the same engine still works.
+        let mut e = engine_with_rule_and_library(RULE);
+        e.set_data(&data_doc()).unwrap();
+        e.set_time_limit(Duration::from_millis(1));
+        e.set_time_limit(Duration::from_secs(30));
+        assert!(e.set_input_from_data("aws.example.widget", 1));
+        assert_eq!(
+            e.eval_rule("data.yata.rules.p.r.fail"),
+            Ok(RegoValue::Bool(true))
+        );
     }
 }

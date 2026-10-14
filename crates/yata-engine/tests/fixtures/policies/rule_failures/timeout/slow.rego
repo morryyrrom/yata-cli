@@ -11,13 +11,14 @@ metadata := {
 	"references": [],
 }
 
-# The first statement needs a widget, so loading (no input) finishes at once. With a widget the
-# nested loops would run for far longer than any test time limit.
-fail contains finding if {
-	some widget in input.aws.example.widget
+# `input.id` needs a widget, so loading (no input) finishes at once. With a widget the nested
+# loops would run for far longer than any test time limit.
+default fail := false
+
+fail if {
+	input.id
 	some i in numbers.range(1, 5000)
 	some j in numbers.range(1, 5000)
 	some k in numbers.range(1, 5000)
 	i + j + k < 0
-	finding := {"resource_id": widget.id, "message": "never"}
 }

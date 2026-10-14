@@ -12,4 +12,4 @@ metadata := {
 	"references": [],
 }
 
-fail contains 1 if { false }
+default fail := false

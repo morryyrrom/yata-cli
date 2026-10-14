@@ -6,10 +6,9 @@ use yata_core::{
     SkipReason,
 };
 
-use crate::engine_config::{RegoFailure, RegoValue};
 use crate::error::EvaluationError;
-use crate::findings;
-use crate::input::{build_input, declared_types, resources_of};
+use crate::input::{build_data, declared_types, resources_of};
+use crate::per_resource::evaluate_resources;
 use crate::rule::Rule;
 
 /// Evaluates `rules` against every account in `inventory`.
@@ -48,6 +47,11 @@ impl Coverage {
 /// Classifies the target groups of one type for one account.
 fn coverage(inventory: &Inventory, account: &str, type_name: &str) -> Coverage {
     let mut coverage = Coverage::default();
+    // The account type is made from the caller identity, not collected: it is always there.
+    if type_name == "aws.account.account" {
+        coverage.collected = 1;
+        return coverage;
+    }
     let Some(info) = inventory
         .resource_types
         .iter()
@@ -98,6 +102,8 @@ fn evaluate_rule(rule: &Rule, inventory: &Inventory, account: &AccountInfo) -> R
         status,
         skip_reason: None,
         error: None,
+        error_kind: None,
+        error_summary: None,
         results: Vec::new(),
         incomplete_resources: Vec::new(),
     };
@@ -126,6 +132,8 @@ fn evaluate_rule(rule: &Rule, inventory: &Inventory, account: &AccountInfo) -> R
         Err(e) => {
             return RuleOutcome {
                 error: Some(one_line(&e.to_string())),
+                error_kind: Some(e.kind()),
+                error_summary: Some(one_line(&e.summary())),
                 ..outcome(RuleStatus::Error)
             };
         }
@@ -150,22 +158,6 @@ fn one_line(message: &str) -> String {
     message.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Evaluates `fail` of `rule` on a clone of its engine with `input` and returns its elements in
-/// the engine's order.
-///
-/// Shared with the rule tests, so that fixtures and real evaluations run the same way.
-pub(crate) fn eval_fail(rule: &Rule, input: &Value) -> Result<Vec<Value>, EvaluationError> {
-    let mut engine = rule.engine().clone();
-    let limit = engine.timeout();
-    engine.set_input(input.clone());
-    match engine.eval_rule(&format!("{}.fail", rule.package())) {
-        Ok(RegoValue::Set(elements)) => Ok(elements),
-        Ok(RegoValue::Undefined | RegoValue::Json(_)) => Err(EvaluationError::FailNotSet),
-        Err(RegoFailure::Timeout) => Err(EvaluationError::Timeout { limit }),
-        Err(RegoFailure::Other(message)) => Err(EvaluationError::Engine { message }),
-    }
-}
-
 /// Evaluates one rule for one account. Returns the results and the incomplete resources.
 fn run(
     rule: &Rule,
@@ -173,21 +165,17 @@ fn run(
     account: &AccountInfo,
     declared: &[&str],
 ) -> Result<(Vec<RuleResult>, Vec<IncompleteResource>), EvaluationError> {
-    let input = build_input(inventory, account, declared)?;
-    let elements = eval_fail(rule, &input)?;
-
-    let metadata = rule.metadata();
-    let target = resources_of(&input, &metadata.target_type);
-    let results = findings::build_results(rule.id(), metadata.severity, &elements, target)?;
-    Ok((results, incomplete_resources(&input, declared)))
+    let data = build_data(inventory, account, declared)?;
+    let results = evaluate_resources(rule, &data)?;
+    Ok((results, incomplete_resources(&data, declared)))
 }
 
 /// Finds resources whose configuration has an operation value that is a failure marker: an
 /// object whose only key is `yata_error`. Sorted by (type, id, region, operation).
-fn incomplete_resources(input: &Value, declared: &[&str]) -> Vec<IncompleteResource> {
+fn incomplete_resources(data: &Value, declared: &[&str]) -> Vec<IncompleteResource> {
     let mut found = Vec::new();
     for type_name in declared {
-        for resource in resources_of(input, type_name) {
+        for resource in resources_of(data, type_name) {
             let (Some(id), Some(region)) = (
                 resource.get("id").and_then(Value::as_str),
                 resource.get("region").and_then(Value::as_str),
