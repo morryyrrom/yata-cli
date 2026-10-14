@@ -27,16 +27,24 @@ flowchart TD
         fx -->|no| each
         fx -->|yes| rd{"Within 4 MiB and readable?"}
         rd -->|no| fr["file_too_large or unreadable (rule-level). Not evaluated"]
-        rd -->|yes| form{"Form valid? (input shape, declared types, duplicates, expected.fail, pass_ / fail_ rule)"}
+        rd -->|yes| form{"Form valid? (data shape, declared types, duplicates, expected.fail, pass_ / fail_ rule)"}
         form -->|no| ffi["fixture_invalid (rule-level). Not evaluated"]
         form -->|yes| dummy{"Account IDs are dummy values only?"}
         dummy -->|no| nd["non_dummy_account_id (rule-level). Still evaluated"]
-        dummy -->|yes| ev{"Evaluate on a clone of the rule engine, compare (id, region) sets"}
-        nd --> ev
-        ev -->|timeout| to["fixture_timeout (rule-level)"]
-        ev -->|other evaluation error| ee["fixture_eval_error (rule-level)"]
-        ev -->|sets differ| mm["fixture_mismatch (rule-level). Lists missing and unexpected"]
-        ev -->|sets equal| eqd{"Any dummy violation for this fixture?"}
+        dummy -->|yes| ev0
+        nd --> ev0
+        ev0["Clone the rule engine and add_data with the fixture data as is (declared arrays sorted by id then region)"] --> evn{"Next target_type resource in id then region order?"}
+        evn -->|yes| evi["set_input: this resource, then eval_rule fail"]
+        evi -->|timeout| to["fixture_timeout (rule-level)"]
+        evi -->|conflict or other engine error, fail undefined or not boolean| ee["fixture_eval_error (rule-level)"]
+        evi -->|fail false| evn
+        evi -->|fail true| evm["eval_rule message and reason. Keep this (id, region) in the actual set"]
+        evm -->|timeout| to
+        evm -->|invalid message or reason, or engine error| ee
+        evm -->|ok| evn
+        evn -->|no| mm0{"Actual set of (id, region) equals expected set? (see Diagram-0011-Fixture-Expectation-Comparison)"}
+        mm0 -->|no| mm["fixture_mismatch (rule-level). Lists missing and unexpected"]
+        mm0 -->|yes| eqd{"Any dummy violation for this fixture?"}
         eqd -->|yes| ndf["Fixture fails (non_dummy_account_id recorded)"]
         eqd -->|no| pass["Fixture passes"]
         fr --> fx

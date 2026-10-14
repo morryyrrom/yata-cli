@@ -59,7 +59,7 @@
 | `--show-passed` | なし | 無効 | `scan` |
 | `--omit-values` | なし | 無効 | `scan` |
 | `--fail-on <SEVERITY\|none>` | なし | 未決事項 | `scan` |
-| `--policy-timeout <SECONDS>`(1〜3600 の整数) | なし | `30`(1 回の評価ごと。[ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「(b) 資源の上限」) | `scan`、`rules test` |
+| `--policy-timeout <SECONDS>`(1〜3600 の整数) | なし | `30`(ルール × アカウントの評価ごと。`rules test` ではフィクスチャ 1 つの評価ごと。どちらもリソースごとの評価の合計。[ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「(b) 資源の上限」) | `scan`、`rules test` |
 
 ### ログの指定
 

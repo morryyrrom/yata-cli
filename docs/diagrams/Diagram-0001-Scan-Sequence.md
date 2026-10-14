@@ -108,8 +108,9 @@ sequenceDiagram
     end
 
     CLI->>Eng: Pass the whole Inventory
-    Eng->>Eng: Per rule and account: build nested input (input.aws.s3.bucket) from target_type and related_types of all regions, decide status, evaluate Rego
-    Eng-->>CLI: RuleOutcome per rule and account (status + pass / fail results)
+    Eng->>Eng: Per rule and account: build data (data.yata.context and data.aws.s3.bucket from target_type and related_types of all regions), decide status
+    Eng->>Eng: Per target_type resource in id then region order: set input to the resource, eval fail (message and reason only when fail is true)
+    Eng-->>CLI: RuleOutcome per rule and account (status + one pass / fail result per resource)
     CLI->>CLI: Build ScanReport (outcomes + collection_errors + metadata incl. policies)
 
     CLI->>CLI: Open output Write (stdout, or temp file in the --output directory)

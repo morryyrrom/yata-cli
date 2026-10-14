@@ -21,7 +21,7 @@ flowchart TD
         lib -->|no| x2m["Exit 2<br/>(directory-wide failure)"]
         lib -->|yes| zero{"Directory has 0 rules?<br/>(checked per directory)"}
         zero -->|yes| x2d["Exit 2<br/>(directory-wide failure)"]
-        zero -->|no| val["Step 4: validate ALL rules, including rules that<br/>will be filtered out. Rule-level failures:<br/>rule name or directory name violates [a-z][a-z0-9_]*<br/>or is a Rego reserved word,<br/>link inside the rule file or its fixtures directory,<br/>rule file size limit,<br/>Rego syntax,<br/>package name differs from yata.rules.ID derived from the path,<br/>metadata error (including type format; related_types must be<br/>the same provider as target_type), fail not defined"]
+        zero -->|no| val["Step 4: validate ALL rules, including rules that<br/>will be filtered out. Rule-level failures:<br/>rule name or directory name violates [a-z][a-z0-9_]*<br/>or is a Rego reserved word,<br/>link inside the rule file or its fixtures directory,<br/>rule file size limit,<br/>Rego syntax,<br/>package name differs from yata.rules.ID derived from the path,<br/>metadata error (including type format; related_types must be<br/>the same provider as target_type), fail is undefined or not a boolean without input"]
     end
 
     val --> mode{"Command is rules test?"}

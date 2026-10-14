@@ -43,11 +43,11 @@ JSON の形式では、`outcomes` を `rules[]`(`results` を除いたルール 
 
 ### 値の扱い
 
-検出(`fail`)は、ルールが返した `path`(不合格の箇所。JSON Pointer)、`actual`(実際の値)、`expected`(期待する値)を持ちます([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)。
+検出(`fail`)は、ルールの `reason` が返した `path`(不合格の箇所。JSON Pointer)、`actual`(実際の値)、`expected`(期待する値)を持ちます([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「ルールの規約」)。
 
 - `actual` は構成情報から取り出した値で、構成情報は伏せずに入っているため、機微な値(メールアドレス、URL に埋め込まれた認証情報など)が入りうる([リソースモデル](Architecture-Resource-Model.ja.md) の「秘密の値の扱い」)。レポートを外部に出すときは `--omit-values` を使う
-- 既定では、すべての形式に `actual` / `expected` を含める。`--omit-values` を指定した場合は、どの形式でも `actual` / `expected` を省き、`scan.values_omitted` を `true` にする(`path` と `message` は残す)。レポートを外部(CI の公開ログ、GitHub code scanning など)に出すときに使う
-- `message` はルールが作る文字列なので、ルールが値を埋め込んでいれば `--omit-values` でも残る。ルールの作者向けの規約として、`message` には値を埋め込まず、値は `actual` に入れる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)
+- 既定では、すべての形式に `actual` / `expected` を含める。`--omit-values` を指定した場合は、どの形式でも `actual` / `expected` を省き、`scan.values_omitted` を `true` にする(`path` と `message` は残す)。状態が `error` のルールの `error` からも、値を含みうる regorus のメッセージだけを省く。`yata-engine` が作る説明(値を含まない。リソースの `id` とリージョンを含む)は残す([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「評価のエラー」)。レポートを外部(CI の公開ログ、GitHub code scanning など)に出すときに使う
+- `message` はルールが作る文字列なので、ルールが値を埋め込んでいれば `--omit-values` でも残る。ルールの作者向けの規約として、`message` には値を埋め込まず、値は `reason` の `actual` に入れる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「ルールの規約」)
 - table では、`actual` / `expected` を JSON の文字列にし、長いものは一定の長さで切り詰めて表示する(長さは実装時に決める)。JSON と SARIF では切り詰めない
 
 ## table
@@ -140,7 +140,7 @@ JSON の形式では、`outcomes` を `rules[]`(`results` を除いたルール 
 - `rules[]` の `skip_reason` と `error` は常に置き、該当しないときは `null` にする。`skip_reason` は `status` が `skipped` のときだけ値(`not_collected` / `collection_failed`)を持ち、`error` は `status` が `error` のときだけ値(説明の文字列)を持つ
 - `rules[]` の `incomplete_resources` は、構成情報に取得の失敗の印を持っていたリソースの一覧(`resource_id`、`resource_type`、`region`、`operation`、`kind`)。`region` はリソースの `region`(同じ `resource_id` が複数のリージョンに現れる場合に区別するため)。無ければ空の配列
 - `results[]` はリソース単位の `pass` / `fail` の結果(`RuleResult`)を、全ルール分まとめて並べる
-- `results[]` の `fail` では `message`、`path`、`actual`、`expected` を常に置き、ルールが返さなかったものは `null` にする。`--omit-values` のときは `actual` / `expected` のキーごと省く。`pass` ではこの 4 つを置かない
+- `results[]` は 1 ルール × 1 リソースにつき 1 件。`fail` では `message`、`path`、`actual`、`expected` を常に置く。`message` はルールの `message`(無ければメタデータの `title`)で、いつも文字列。`path`、`actual`、`expected` は、ルールの `reason` に無かったものを `null` にする(`actual` / `expected` の値そのものが `null` の場合と区別しない)。`--omit-values` のときは `actual` / `expected` のキーごと省く。`pass` ではこの 4 つを置かない
 - `schema_version` は互換性の無い変更(項目の削除・意味の変更)のときに上げる。項目の追加では上げない
 - `scan.source` は収集元を表す。AWS から直接収集した場合は `aws`、`--snapshot` で評価した場合は `snapshot`。上の例は、別のルールを選んで `yata collect` したスナップショットを評価したため、1 件が `not_collected` になった場合を示す
 - 値はすべてダミーの例です

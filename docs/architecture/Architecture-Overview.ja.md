@@ -37,7 +37,7 @@ Yata Cloud は Rust 製の OSS CNAPP です。初期スコープは AWS アカ�
 | Inventory | 1 回の収集の全体(ResourceSet の集まりと、収集の失敗の記録) |
 | スナップショット(Snapshot) | `yata collect` が Inventory を保存したディレクトリ。ルートにマニフェスト `yata-snapshot.json` を置く |
 | コレクター(Collector) | 1 つのリソース種別を AWS API から収集する処理 |
-| ルール(Rule) | 1 つのチェック。Rego で書いた 1 ファイル(`<ルール名>.rego`)で、メタデータと不合格を返す `fail` からなる |
+| ルール(Rule) | 1 つのチェック。Rego で書いた 1 ファイル(`<ルール名>.rego`)で、メタデータと、評価の対象のリソースが不合格かを表す `fail`(真偽値)からなる。任意で `message` と `reason` を持つ |
 | フィクスチャ(Fixture) | ルールの合格・不合格を確かめるための入力データ(ダミー値のみ)。`<ルール名>.fixtures/` に置く |
 | ポリシーのディレクトリ(policy directory) | ルールを置いたディレクトリ。ルートにマニフェスト(`yata-policies.json`)を置き、その下の階層は自由。外部のポリシーのリポジトリを取得したものを指す |
 | マニフェスト(Manifest) | ポリシーのディレクトリのルートに置く、ポリシーのセットの名前、形式のバージョン、必要な `yata` のバージョンを書いたファイル。ルールの一覧ではない |
@@ -69,7 +69,7 @@ Yata Cloud は Rust 製の OSS CNAPP です。初期スコープは AWS アカ�
 2. **ルールの読み込み**(`yata-cli`, `yata-engine`): `yata-cli` がポリシーのディレクトリを決め(`--policy-dir` → `YATA_POLICY_DIR`。どちらも無ければ終了コード 2)、`yata-engine` に渡す。`yata-engine` がディレクトリの存在を確かめ(見つからない・読めなければ終了コード 2)、マニフェストで互換性を確かめ、資源の上限の範囲で走査してライブラリとルール(`<ルール名>.rego`)を読み込み、メタデータを検証する。`yata-cli` が `yata-engine` の関数で `--rule` などの絞り込みを適用する(0 件なら終了コード 2)
 3. **収集対象の決定**(`yata-cli`): 選ばれたルールのメタデータ `target_type` / `related_types` を集め、`yata-provider-aws` が公開する対応する種別の一覧と照らし合わせる(対応していない種別があれば終了コード 2)。必要なリソース種別だけを収集対象にする
 4. **収集**(`yata-provider-aws`): 認証情報を解決し、`sts:GetCallerIdentity` でアカウントを確認し、対象リージョンを決める。アカウント × リージョン × リソース種別ごとにコレクターを並行実行し、成功した組を `ResourceSet` にして、`Inventory` にまとめて `yata-cli` に返す。失敗した組は `Inventory.collection_errors` に記録して続行する
-5. **評価**(`yata-engine`): `yata-cli` が `Inventory` を `yata-engine` に渡す。`yata-engine` がルール × アカウントごとに、そのアカウントの全リージョンの、ルールが宣言したリソース種別のリソースを入れ子の形(`input.aws.s3.bucket` など)にまとめて `input` を作り、Rego を評価して `pass` / `fail` の結果とルールの状態を作る
+5. **評価**(`yata-engine`): `yata-cli` が `Inventory` を `yata-engine` に渡す。`yata-engine` がルール × アカウントごとに、そのアカウントの全リージョンの、ルールが宣言したリソース種別のリソースを入れ子の形(`data.aws.s3.bucket` など)にまとめて `data` を作り、`target_type` のリソースごとにそのリソースを `input` にして Rego を評価し、リソースごとに 1 件の `pass` / `fail` の結果と、ルールの状態を作る
 6. **レポートの組み立て**(`yata-cli`): 評価結果(ルールの状態と結果)、収集エラー(`collection_errors`)、メタ情報(ツールのバージョン、開始・終了の日時、アカウント、リージョン、入力の種類)から `ScanReport` を作る
 7. **出力**(`yata-report`): `yata-cli` が出力先(標準出力、または `--output` の一時ファイル)を開いて `std::io::Write` として渡し、`yata-report` が指定の形式で書く。ファイルの場合は、書き終えた後に `yata-cli` が一時ファイルを目的の名前に変える
 8. **終了**(`yata-cli`): 検出・エラーの有無から終了コードを決める。終了コード 2 / 3 と 130 のときは、レポートを出力しない(理由は標準エラー出力に出す)。例外として、出力の書き込み中の失敗で終了コード 3 になった場合、`--output` のときは一時ファイルを削除して既存のファイルは変えず、標準出力のときは途中まで出力されていることがある([CLI インターフェース](Architecture-CLI-Interface.ja.md))
@@ -101,6 +101,7 @@ Yata Cloud は Rust 製の OSS CNAPP です。初期スコープは AWS アカ�
 | [コレクターのビルド時自動検出](../adr/ADR-0001-Collector-Discovery-via-Build-Script.ja.md) | コレクターは 1 リソース種別 1 ファイルとし、build.rs がモジュール宣言と一覧を生成する |
 | [AWS SDK for Rust と読み取り専用ガード](../adr/ADR-0001-AWS-SDK-and-Read-Only-Guard.ja.md) | 公式の AWS SDK for Rust を使い、Describe / List / Get 以外の操作を実行時に拒否する(例外リストにある操作を除く) |
 | [読み取り専用ガードで GenerateCredentialReport を許可する](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) | IAM の認証情報レポートを使うため、`GenerateCredentialReport` を読み取り専用ガードの例外リストに加える |
+| [ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md) | ルールは `target_type` のリソースごとに評価し、1 ルール × 1 リソースにつき 1 件の結果を作る。`input` は評価の対象のリソース、`data` はアカウントの宣言した種別の全リソース。ルールは `default fail := false` と `fail if { ... }` で書き、任意で `message` / `reason` を返す |
 
 ## 個別機能の設計との関係
 

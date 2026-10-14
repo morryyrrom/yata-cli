@@ -3,7 +3,7 @@
 > This Japanese version is the authoritative source. The English version (`ADR-0001-Policy-and-Fixture-Layout.md`) has not been written yet.
 
 - ステータス: 承認
-- 関連: [ADR: ポリシーエンジン](ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md)、[ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md)、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、[テスト方針](../architecture/Architecture-Testing-Strategy.ja.md)
+- 関連: [ADR: ポリシーエンジン](ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md)、[ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md)(ルールの書式、`input` の形、フィクスチャの形式を変更)、[ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md)、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、[テスト方針](../architecture/Architecture-Testing-Strategy.ja.md)
 
 ## 背景
 
@@ -44,7 +44,7 @@
 ```
 
 - 階層は自由。ルールのファイルは `<ルール名>.rego` で、`lib/` の下を除き、ルートの直下も含めて、任意の場所に置ける
-- ディレクトリ名、ルール名、マニフェストの `name`、リソース種別の各部分は `[a-z][a-z0-9_]*` に限り、Rego の予約語(`as`、`contains`、`default`、`else`、`every`、`false`、`if`、`import`、`in`、`not`、`null`、`package`、`some`、`true`、`with`)を使わない。パッケージ名や `input.aws.<service>.<resource>` を、ドット区切りの形で必ず書けるようにするため。違反はルール単位の失敗(マニフェストの `name` はディレクトリ全体の失敗)
+- ディレクトリ名、ルール名、マニフェストの `name`、リソース種別の各部分は `[a-z][a-z0-9_]*` に限り、Rego の予約語(`as`、`contains`、`default`、`else`、`every`、`false`、`if`、`import`、`in`、`not`、`null`、`package`、`some`、`true`、`with`)を使わない。パッケージ名や `data.aws.<service>.<resource>`(決定の時点では `input.aws.<service>.<resource>`。[ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で `data` に移した)を、ドット区切りの形で必ず書けるようにするため。違反はルール単位の失敗(マニフェストの `name` はディレクトリ全体の失敗)
 - メタデータもルールのファイルに書く(1 ルール 1 ファイル)
 - ルールのプロバイダは、パスではなく、メタデータの `target_type` の最初の部分で決まる
 - 深さは資源の上限(最大の深さ)だけで制限し、「浅すぎる・深すぎる」の検査はしない。最大の深さより深いディレクトリに中身があれば、ディレクトリ全体の失敗(終了コード 2)にする
@@ -75,31 +75,39 @@
 - `format_version` がその `yata` の対応する値でない、または実行中の `yata` が `min_yata_version` より古い場合は、終了コード 2 にする
 - JSON にするのは、`yata` がすでに `serde_json` を使っており、TOML などのパーサーを追加しなくて済むため
 - `min_yata_version` は `x.y.z` の形に限る(違えば終了コード 2)。比べるときは、実行中の `yata` のバージョンのプレリリースの部分を無視する
-- マニフェスト、ルールのメタデータ、`fail` の要素の知らないキーは無視する(前方互換)。判定に関わらないキーを足すときは `min_yata_version` を上げなくてよく、そのキーの効果を必須にしたい場合だけ上げる。正しく評価するために必須のキーを足すときは `format_version` を上げる
-- リソースの構成情報(`configuration`)は、公開した種別では項目の追加だけを許す。名前の変更・削除・型や意味の変更が必要なら、新しいリソース種別名を作る(原則)。`format_version` を上げるのは `input` 全体の形やリソースの共通の項目を変えるときだけ。種別名を変えるほうが、影響がその種別を使うルールだけに限られるため。例外として、秘密の値を伏せる項目の追加は、安全上の修正として同じ種別名のまま行い、リリースノートで告知する(その項目を参照するルールは影響を受けうる)([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「構成情報の互換性」)
+- マニフェスト、ルールのメタデータ、`fail` の要素(ADR-0030 の後はルールの `reason`)の知らないキーは無視する(前方互換)。判定に関わらないキーを足すときは `min_yata_version` を上げなくてよく、そのキーの効果を必須にしたい場合だけ上げる。正しく評価するために必須のキーを足すときは `format_version` を上げる
+- リソースの構成情報(`configuration`)は、公開した種別では項目の追加だけを許す。名前の変更・削除・型や意味の変更が必要なら、新しいリソース種別名を作る(原則)。`format_version` を上げるのは `input` 全体の形(ADR-0030 の後は `input` / `data` の形)やリソースの共通の項目を変えるときだけ。種別名を変えるほうが、影響がその種別を使うルールだけに限られるため。例外として、秘密の値を伏せる項目の追加は、安全上の修正として同じ種別名のまま行い、リリースノートで告知する(その項目を参照するルールは影響を受けうる)([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「構成情報の互換性」)
   - この例外は廃止した。コレクターは秘密の値も伏せずに入れる方針とし、伏せる規則をなくしたため([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「コレクターの方針」「秘密の値の扱い」、[最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「コレクターの方針」)
 
 ### ルールの書式
 
-- `metadata`(定数のオブジェクト)と `fail`(部分集合ルール)を持つ
-- メタデータの `target_type`(検出の対象の種別 1 つ)と `related_types`(参照するだけの種別の配列、任意)で、使う種別を宣言する
-- `fail` の各要素は `{resource_id, resource_region, message, path, actual, expected}`(`resource_region` と `path` 以降は任意)。不合格の箇所ごとに要素を返す
-  - `resource_region` は、同じ `id` が複数のリージョンに現れる種別(CloudTrail の shadow trail など)で、そのうち 1 つのリソースを検出の対象にするときに付ける。省略すると、その `id` のすべてのリソースの検出になる([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「id の一意性」、[最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「同じ ARN の証跡と `id`」)
-- ルールは `input.aws.s3.bucket` のように、リソース種別を入れ子にした形で参照する
+この節の `fail` の形と参照の仕方は、[ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で変更しました。現在の決定は次のとおりです。
+
+- `metadata`(定数のオブジェクト)と `fail`(真偽値の完全ルール。`default fail := false` を書く)を持つ。任意で `message`(文字列)と `reason`(`{path, actual, expected}`)を持つ
+- メタデータの `target_type`(評価の対象の種別 1 つ)と `related_types`(参照するだけの種別の配列、任意)で、使う種別を宣言する
+- ルールは `target_type` のリソースごとに評価され、評価の対象のリソースが `input` に入る。宣言した種別の全リソースは `data.aws.s3.bucket` のように、リソース種別を入れ子にした形で参照する
 - 項目と規約は [ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) で定める
+
+変更前の決定(参考): `fail` は部分集合ルールで、各要素は `{resource_id, resource_region, message, path, actual, expected}`(`resource_region` と `path` 以降は任意)とし、不合格の箇所ごとに要素を返していた。`resource_region` は、同じ `id` が複数のリージョンに現れる種別で 1 つのリソースを指すためのキーだった。ルールは `input.aws.s3.bucket` のように参照していた。
 
 ### フィクスチャの形式
 
-図: [フィクスチャの期待値と結果の対応](../diagrams/Diagram-0011-Result-to-Resource-Mapping.md)
+図: [フィクスチャの期待値と結果の対応](../diagrams/Diagram-0011-Fixture-Expectation-Comparison.md)
 
 各フィクスチャは JSON で、ルールへの入力と期待する結果を持ちます。
+
+フィクスチャの入力のキーと形は、[ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で変更しました。変更前は、キー `input` の下に `account`、`regions`、種別の配列を置き、エンジンがルールに渡す `input` と同じ形にしていました。現在は、キー `data` の下に Rego の `data` と同じ形の値を置きます。
 
 ```json
 {
   "description": "Bucket with BlockPublicAcls disabled",
-  "input": {
-    "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
-    "regions": ["us-east-1"],
+  "data": {
+    "yata": {
+      "context": {
+        "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
+        "regions": ["us-east-1"]
+      }
+    },
     "aws": {
       "s3": {
         "bucket": [
@@ -132,15 +140,15 @@
 }
 ```
 
-- `input` は、エンジンがそのルールに渡す `input` と同じ形([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」)
+- `data` は、エンジンがルールに渡す Rego の `data` と同じ形([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」)。エンジンはこれをそのまま Rego の `data` に入れ、`target_type` の配列のリソースを 1 件ずつ Rego の `input` にして評価する([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「フィクスチャの評価」)
   - ルールが `target_type` / `related_types` で宣言した種別の配列をすべて置く(0 件のケースは空の配列)。欠けたフィクスチャは形式の誤りとしてテストを失敗させる(実際の評価では、未収集の種別があるとルールは `skipped` になり評価されないため)
 - `expected.fail` は不合格になるリソースの一覧(順不同)。ここに無い、`target_type` のリソースは合格になることを期待する。各要素は次のどちらかで書く
   - `id` の文字列(例: `"arn:aws:s3:::example-bucket"`): その `id` のすべてのリソース(リージョンを問わない)が不合格になることを期待する。`id` が一意な種別では、これまでどおりこの形で書けばよい
   - `{"id": ..., "region": ...}` のオブジェクト(例: `{"id": "arn:aws:cloudtrail:us-east-1:123456789012:trail/example-trail", "region": "eu-west-1"}`): その `id` とリージョンのリソースだけが不合格になることを期待する。同じ `id` が複数のリージョンに現れる種別で、どのリージョンのものが不合格かを確かめるときに使う。`id` と `region` はどちらも必須で、文字列
   - 重複なし: 同じ `id` の文字列を重ねること、同じ `{id, region}` を重ねること、同じ `id` を文字列とオブジェクトの両方で書くことは、フィクスチャの誤り
-  - 各要素は `input` の `target_type` のリソースを 1 つ以上指す。指さない要素(`id` の書き間違いなど)はフィクスチャの誤り
+  - 各要素は `data` の `target_type` のリソースを 1 つ以上指す。指さない要素(`id` の書き間違いなど)はフィクスチャの誤り
   - 比べ方は [ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「期待値の比べ方」
-- `input` の同じ種別の配列に、`id` と `region` の組が同じリソースを複数置くことは、フィクスチャの誤り([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「id の一意性」)
+- `data` の同じ種別の配列に、`id` と `region` の組が同じリソースを複数置くことは、フィクスチャの誤り([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「id の一意性」)
 - ファイル名は `pass_` または `fail_` で始める
   - `pass_`: `expected.fail` が空であること
   - `fail_`: `expected.fail` が 1 件以上であること
@@ -224,6 +232,7 @@
 - ポリシーと `yata` が別々にリリースされるため、コレクターの構成情報を変えると外部のルールが黙って `pass` になりうる。公開した種別の構成情報は追加だけを許し、互換性の無い変更は新しいリソース種別名で行う。このリポジトリでは、コレクターの出力を固定するテストで確かめる。秘密の値を伏せる項目の追加の例外は、伏せる規則をなくしたため廃止した(上の「マニフェスト」)
 - 同じ `id` が複数のリージョンに現れる種別は、`fail` の要素の `resource_region` と、`expected.fail` の要素のオブジェクトの形(`{"id", "region"}`)で、1 つのリソースを指す。どちらも省略・文字列の形で書けるため、`id` が一意な種別のルールとフィクスチャは書き方が変わらない
   - `resource_region`(無視すると判定が変わるキー)、`expected.fail` のオブジェクトの形、`id` の一意性の変更(リソースの共通の項目の意味の変更)は、どれも本来は `format_version` を上げる対象だが、ポリシーの形式の最初のリリースの前に定めるため、`format_version` `1` に含める
+  - `resource_region` は [ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で廃止した。ルールはリソースごとに評価され、同じ `id` のコピーもそれぞれ別のリソースとして評価されるため。`expected.fail` のオブジェクトの形は残す
 
 ## 出典
 

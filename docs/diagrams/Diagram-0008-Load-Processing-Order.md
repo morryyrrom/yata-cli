@@ -32,7 +32,7 @@ flowchart TD
         rule4 -->|no| rfail
         rule4 -->|yes| rule5{"metadata passes validation?"}
         rule5 -->|no| rfail3["Record rule-level failure: metadata_invalid"]
-        rule5 -->|yes| rule6{"fail evaluates to a set (empty allowed)?"}
+        rule5 -->|yes| rule6{"fail evaluates to a boolean with no input? (undefined or not a boolean gives fail_missing)"}
         rule6 -->|no| rfail4["Record rule-level failure: fail_missing"]
         rule6 -->|yes| rkeep["Keep the rule: engine, metadata, path"]
     end
