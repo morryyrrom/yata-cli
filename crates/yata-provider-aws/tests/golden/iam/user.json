@@ -1,0 +1,100 @@
+[
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "ListAttachedUserPolicies": {
+        "AttachedPolicies": [
+          {
+            "PolicyArn": "arn:aws:iam::aws:policy/ReadOnlyAccess",
+            "PolicyName": "ReadOnlyAccess"
+          },
+          {
+            "PolicyArn": "arn:aws:iam::aws:policy/ViewOnlyAccess",
+            "PolicyName": "ViewOnlyAccess"
+          }
+        ]
+      },
+      "ListUserPolicies": {
+        "PolicyNames": [
+          "example-inline-policy",
+          "second"
+        ]
+      },
+      "ListUsers": {
+        "Arn": "arn:aws:iam::123456789012:user/alice",
+        "CreateDate": "2026-01-01T00:00:00Z",
+        "PasswordLastUsed": "2026-02-01T00:00:00Z",
+        "Path": "/",
+        "PermissionsBoundary": {
+          "PermissionsBoundaryArn": "arn:aws:iam::123456789012:policy/boundary",
+          "PermissionsBoundaryType": "PermissionsBoundaryPolicy"
+        },
+        "Tags": [
+          {
+            "Key": "team",
+            "Value": "example"
+          }
+        ],
+        "UserId": "AIDAEXAMPLEALICE",
+        "UserName": "alice"
+      }
+    },
+    "id": "arn:aws:iam::123456789012:user/alice",
+    "name": "alice",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.user"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "ListAttachedUserPolicies": {
+        "AttachedPolicies": null
+      },
+      "ListUserPolicies": {
+        "PolicyNames": []
+      },
+      "ListUsers": {
+        "Arn": "arn:aws:iam::123456789012:user/carol",
+        "CreateDate": "2026-01-01T00:00:00Z",
+        "PasswordLastUsed": null,
+        "Path": "/",
+        "PermissionsBoundary": null,
+        "Tags": null,
+        "UserId": "AIDAEXAMPLECAROL",
+        "UserName": "carol"
+      }
+    },
+    "id": "arn:aws:iam::123456789012:user/carol",
+    "name": "carol",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.user"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "ListAttachedUserPolicies": {
+        "AttachedPolicies": []
+      },
+      "ListUserPolicies": {
+        "PolicyNames": []
+      },
+      "ListUsers": {
+        "Arn": "arn:aws:iam::123456789012:user/team/bob",
+        "CreateDate": "2026-01-01T00:00:00Z",
+        "PasswordLastUsed": null,
+        "Path": "/team/",
+        "PermissionsBoundary": null,
+        "Tags": null,
+        "UserId": "AIDAEXAMPLEBOB",
+        "UserName": "bob"
+      }
+    },
+    "id": "arn:aws:iam::123456789012:user/team/bob",
+    "name": "bob",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.user"
+  }
+]
