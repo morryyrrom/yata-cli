@@ -389,7 +389,10 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 
 **(c) 出力への注入**
 
-- ルールが返す `message` と `reason` の `actual` / `expected` と、メタデータの文字列(`title`、`description`、`remediation` など)は、table 形式で端末に書く前に、制御文字(ANSI のエスケープシーケンスを含む)を取り除くか、エスケープする。ログに出すときも同じ
+- ルールが返す `message` と `reason` の `actual` / `expected` と、メタデータの文字列(`title`、`description`、`remediation` など)は、table 形式で端末に書く前に、表示を偽装できる文字を取り除くか、エスケープする。ログに出すときも同じ
+  - 対象: 制御文字(C0・C1 の制御文字と DEL。ANSI のエスケープシーケンスを含む)、行・段落の区切り(U+2028、U+2029)、双方向テキストの制御文字(U+200E、U+200F、U+202A〜U+202E、U+2066〜U+206F、U+061C)
+  - 理由: 端末や CI のログで、色や行の書き換え、行の分割、表示される文字の順序の入れ替えによって、結果の表示を偽装されないようにするため
+  - `yata rules test` の text の形式の扱いは [ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md) の「text の形式」で決めた
 - JSON と SARIF では、シリアライズの際にエスケープされる
 - 取り除く・エスケープする方法の詳細は、レポートの機能の Issue で決める
 

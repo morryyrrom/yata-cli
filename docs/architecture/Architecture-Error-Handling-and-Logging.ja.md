@@ -52,7 +52,7 @@
 
 - `tracing` でログを出し、`tracing-subscriber` で標準エラー出力に書く
 - 指定は「オプション > 環境変数 > 既定値」の規則に従う([CLI インターフェース](Architecture-CLI-Interface.ja.md) の「オプションの優先度」)
-  - `-v` で `info`、`-vv` で `debug`、`-vvv` で `trace`、`-q` で `error` だけ。`-v` / `-q` を指定したら `YATA_LOG` は使わない
+  - `-v` で `info`、`-vv` で `debug`、`-vvv` で `trace`、`-q` で `error` だけ(いずれも `yata` 自身のクレートのレベル。`EnvFilter` の書式では、`-q` は `warn,yata=error`、`-v` は `warn,yata=info` になる)。`-v` / `-q` を指定したら `YATA_LOG` は使わない
   - `-v` / `-q` が無ければ、環境変数 `YATA_LOG`(`tracing-subscriber` の `EnvFilter` の書式)を使う
   - どちらも無ければ `warn`
 - 依存クレート(AWS SDK、regorus など)のログは、`YATA_LOG` で明示しない限り `warn` 以上だけを出す(`-v` / `-q` は `yata` 自身のクレートのレベルだけを変える)
