@@ -8,11 +8,11 @@ flowchart TD
         c1 -->|no| c2{"Step 2: Any declared type has all of its groups failed?"}
         c2 -->|yes| sk2["skipped (collection_failed). Not evaluated, no results"]
         c2 -->|no| eval["Evaluate the rule"]
-        eval --> c3{"Step 3: Error during evaluation? (timeout, malformed fail element, resource_id not of target_type, resource_region not a string, no target_type resource with that id and region, ...)"}
+        eval --> c3{"Step 3: Error during evaluation? (timeout, fail undefined or not a boolean, invalid message or reason, conflict, other engine error)"}
         c3 -->|yes| err["error. No results"]
         c3 -->|no| c4{"Step 4: Any declared type has some failed groups (and some collected groups)?"}
         c4 -->|yes| inc["incomplete. Results from the collected groups"]
-        c4 -->|no| c5{"Step 5: Any resource in the input (target_type or related_types) has a failure marker yata_error in its configuration?"}
+        c4 -->|no| c5{"Step 5: Any resource in data (target_type or related_types) has a failure marker yata_error in its configuration?"}
         c5 -->|yes| inc2["incomplete. The resource is evaluated and listed in incomplete_resources"]
         c5 -->|no| ev["Step 6: evaluated. Results are produced"]
     end

@@ -3,7 +3,7 @@
 > This Japanese version is the authoritative source. The English version (`ADR-0001-Policy-Engine-Rego-with-Regorus.md`) has not been written yet.
 
 - ステータス: 承認
-- 関連: [アーキテクチャ概要](../architecture/Architecture-Overview.ja.md)、[ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md)
+- 関連: [アーキテクチャ概要](../architecture/Architecture-Overview.ja.md)、[ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md)、[ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md)
 
 ## 背景
 
@@ -54,3 +54,4 @@ Yata Cloud は、AWS から収集したリソースを宣言的なルールで�
 ## 追記
 
 - 「決定」の評価時間の上限の確認は、[ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md) で行った。`set_execution_timer_config` で `eval_rule` の評価を打ち切る方式とし(1 回の組み込み関数の呼び出しの途中では止まらない)、別スレッドで評価する方式は採らない。詳細は同ページの「評価時間の上限の実現方法」。有効にする cargo feature も同ページの「regorus の cargo feature」で決めた
+- 「検討した選択肢」の Rego の長所に挙げた「部分集合ルールでの複数の検出」は、[ADR: ルールをリソースごとに評価する](ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で使わないことにした。ルールは `target_type` のリソースごとに評価し、`fail` を真偽値で返す。複数のリソースの突き合わせは `data` で行い、要件(複数のリソースを突き合わせる判定、不合格のリソースごとの理由のメッセージ)は引き続き満たす。評価時間の上限は、ルール × アカウントのリソースごとの評価の合計に掛ける

@@ -1,0 +1,125 @@
+[
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetPolicyVersion": {
+        "PolicyVersion": {
+          "CreateDate": "2015-02-06T18:39:46Z",
+          "Document": {
+            "Statement": [
+              {
+                "Action": "*",
+                "Effect": "Allow",
+                "Resource": "*"
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "IsDefaultVersion": true,
+          "VersionId": "v1"
+        }
+      },
+      "ListPolicies": {
+        "Arn": "arn:aws:iam::123456789012:policy/example-policy",
+        "AttachmentCount": 2,
+        "CreateDate": "2015-02-06T18:39:46Z",
+        "DefaultVersionId": "v1",
+        "Description": null,
+        "IsAttachable": true,
+        "Path": "/",
+        "PermissionsBoundaryUsageCount": 0,
+        "PolicyId": "ANPAEXAMPLEEXAMPLEPOLICY",
+        "PolicyName": "example-policy",
+        "Tags": null,
+        "UpdateDate": "2015-02-06T18:39:46Z"
+      }
+    },
+    "id": "arn:aws:iam::123456789012:policy/example-policy",
+    "name": "example-policy",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.policy"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetPolicyVersion": {
+        "PolicyVersion": {
+          "CreateDate": "2015-02-06T18:39:46Z",
+          "Document": {
+            "Statement": [
+              {
+                "Action": "*",
+                "Effect": "Allow",
+                "Resource": "*"
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "IsDefaultVersion": true,
+          "VersionId": "v1"
+        }
+      },
+      "ListPolicies": {
+        "Arn": "arn:aws:iam::123456789012:policy/unattached-policy",
+        "AttachmentCount": 0,
+        "CreateDate": "2015-02-06T18:39:46Z",
+        "DefaultVersionId": "v1",
+        "Description": null,
+        "IsAttachable": true,
+        "Path": "/",
+        "PermissionsBoundaryUsageCount": 0,
+        "PolicyId": "ANPAEXAMPLEUNATTACHEDPOLICY",
+        "PolicyName": "unattached-policy",
+        "Tags": null,
+        "UpdateDate": "2015-02-06T18:39:46Z"
+      }
+    },
+    "id": "arn:aws:iam::123456789012:policy/unattached-policy",
+    "name": "unattached-policy",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.policy"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetPolicyVersion": {
+        "PolicyVersion": {
+          "CreateDate": "2015-02-06T18:39:46Z",
+          "Document": {
+            "Statement": [
+              {
+                "Action": "*",
+                "Effect": "Allow",
+                "Resource": "*"
+              }
+            ],
+            "Version": "2012-10-17"
+          },
+          "IsDefaultVersion": true,
+          "VersionId": "v1"
+        }
+      },
+      "ListPolicies": {
+        "Arn": "arn:aws:iam::aws:policy/AdministratorAccess",
+        "AttachmentCount": 1,
+        "CreateDate": "2015-02-06T18:39:46Z",
+        "DefaultVersionId": "v1",
+        "Description": null,
+        "IsAttachable": true,
+        "Path": "/",
+        "PermissionsBoundaryUsageCount": 0,
+        "PolicyId": "ANPAEXAMPLEADMINISTRATORACCESS",
+        "PolicyName": "AdministratorAccess",
+        "Tags": null,
+        "UpdateDate": "2015-02-06T18:39:46Z"
+      }
+    },
+    "id": "arn:aws:iam::aws:policy/AdministratorAccess",
+    "name": "AdministratorAccess",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.policy"
+  }
+]

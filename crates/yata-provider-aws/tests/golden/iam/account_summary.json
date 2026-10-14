@@ -1,0 +1,20 @@
+[
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetAccountSummary": {
+        "SummaryMap": {
+          "AccountAccessKeysPresent": 0,
+          "AccountMFAEnabled": 1,
+          "AccountPasswordPresent": 1,
+          "Users": 3,
+          "UsersQuota": 5000
+        }
+      }
+    },
+    "id": "aws.iam.account_summary:123456789012:global",
+    "region": "global",
+    "tags": {},
+    "type": "aws.iam.account_summary"
+  }
+]

@@ -6,6 +6,8 @@
 
 全体設計は [アーキテクチャ概要](../architecture/Architecture-Overview.ja.md)、リソース種別と構成情報の規則は [リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、ルールのメタデータは [ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md)、読み取り専用ガードは [AWS アクセス](../architecture/Architecture-AWS-Access.ja.md) を参照してください。認証情報レポートの扱いは [ADR: 読み取り専用ガードで GenerateCredentialReport を許可する](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md) に記録します。
 
+ルールの書式と評価の単位は、この設計の後に [ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で変わりました(ルールは `target_type` のリソースごとに評価され、評価の対象のリソースが `input`、宣言した種別の全リソースが `data` に入る。`fail` の要素の `resource_region` は廃止)。このページの判定の形の説明(「リージョンをまたぐ判定」「監視のコントロール」「CloudTrail の証跡」)は、その変更に合わせて直してあります。「全体設計への反映」と「後続の Issue」は、この設計の時点の計画の記録です。
+
 ## 目的と背景
 
 - 最初のリリースで評価できるコントロールの範囲を決める
@@ -109,16 +111,16 @@
 
 ### リージョンをまたぐ判定
 
-`input` はアカウント単位で、全リージョンのリソースを種別ごとに 1 つの配列にまとめ、`input.regions` に対象にしたリージョンを入れます([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」)。この形に合わせ、次のように判定します。
+ルールは `target_type` のリソースごとに評価され、そのリソースが `input` に入ります。`data` はアカウント単位で、全リージョンのリソースを種別ごとに 1 つの配列にまとめ、`data.yata.context.regions` に対象にしたリージョンを入れます([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」)。この形に合わせ、次のように判定します。
 
 | コントロール | 判定の形 |
 | --- | --- |
-| 4.1 | `input.aws.cloudtrail.trail` の中に、`IsMultiRegionTrail` が真で、`GetTrailStatus.IsLogging` が真で、管理イベントの読み書きをすべて記録する証跡が 1 つ以上あるかを見る。配列には、ホームリージョンの証跡と、ほかのリージョンに現れる shadow trail の両方が入る(下の「CloudTrail の証跡」)。存在を確かめる判定なので、どちらのコピーで条件を満たしてもよく、同じ証跡が複数あっても結果は 1 件(`aws.account.account`)のまま |
-| 6.1.1 | `aws.ec2.ebs_encryption_default` は対象リージョンごとに 1 件あるので、各リソースを判定する。`input.regions` のリージョンのうちリソースが無いものは、収集の失敗・未収集としてエンジンがルールの状態で表す |
-| 4.7 | VPC ごとに、`input.aws.ec2.flow_log` に `ResourceId` がその VPC の ID のフローログがあるかを見る。VPC とフローログは同じリージョンにある |
+| 4.1 | `input` はアカウント(`aws.account.account`)。`data.aws.cloudtrail.trail` の中に、`IsMultiRegionTrail` が真で、`GetTrailStatus.IsLogging` が真で、管理イベントの読み書きをすべて記録する証跡が 1 つ以上あるかを見る。配列には、ホームリージョンの証跡と、ほかのリージョンに現れる shadow trail の両方が入る(下の「CloudTrail の証跡」)。存在を確かめる判定なので、どちらのコピーで条件を満たしてもよく、同じ証跡が複数あっても結果は 1 件(`aws.account.account`)のまま |
+| 6.1.1 | `aws.ec2.ebs_encryption_default` は対象リージョンごとに 1 件あるので、各リソース(`input`)を判定する。`data.yata.context.regions` のリージョンのうちリソースが無いものは、収集の失敗・未収集としてエンジンがルールの状態で表す |
+| 4.7 | VPC(`input`)ごとに、`data.aws.ec2.flow_log` に `ResourceId` がその VPC の ID のフローログがあるかを見る。VPC とフローログは同じリージョンにある |
 | 5.2、5.3 | 証跡(ホームリージョンのものか shadow trail かを問わない)の `CloudWatchLogsLogGroupArn` のロググループのリージョンで、メトリクスフィルター・アラーム・SNS のトピックを探す。リージョンをまたいで配列からたどれる。証跡の設定はどのコピーでも同じなので、同じ証跡の複数のコピーからたどっても、たどり着く先は同じ |
 
-- 「全リージョン」は、そのスキャンの対象リージョン(`input.regions`)の範囲での判定になる。`--region` で対象を絞った場合、対象外のリージョンは判定に入らない(未決事項)
+- 「全リージョン」は、そのスキャンの対象リージョン(`data.yata.context.regions`)の範囲での判定になる。`--region` で対象を絞った場合、対象外のリージョンは判定に入らない(未決事項)
 
 ### 監視のコントロール
 
@@ -131,7 +133,7 @@
 3. そのフィルターのメトリクス(名前と名前空間)に対するアラームがある(`aws.cloudwatch.metric_alarm`)
 4. アラームのアクションの SNS のトピックに、確認済みの購読が 1 つ以上ある(`aws.sns.topic`)
 
-結果は `aws.account.account` の 1 件なので、shadow trail が重複して現れても結果は増えません。メンバーアカウントで組織の証跡(shadow trail)しか無い場合、ロググループは通常、組織の証跡を作ったアカウントにあり、2〜4 が `input` に無いため `fail` になります。この場合の判定と `message` の書き方(組織の証跡のロググループが別のアカウントにあることを示すなど)は未決事項「別のアカウントにある証跡の送り先」で決めます。
+結果は `aws.account.account` の 1 件なので、shadow trail が重複して現れても結果は増えません。メンバーアカウントで組織の証跡(shadow trail)しか無い場合、ロググループは通常、組織の証跡を作ったアカウントにあり、2〜4 が `data` に無いため `fail` になります。この場合の判定と `message` の書き方(組織の証跡のロググループが別のアカウントにあることを示すなど)は未決事項「別のアカウントにある証跡の送り先」で決めます。
 
 5.1、5.4〜5.15 も同じ 4 つの種別で判定できるため、今回の範囲に含めなかったものも、コレクターを足さずにルールだけで追加できます。
 
@@ -189,7 +191,7 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 - **返った結果は、絞り込まず・置き換えずにすべて入れる**
 - **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、ポリシー文書の URL デコードと JSON のパース。ページングの項目と応答のメタデータを含めないことは、全体設計の「格納の形」のとおり
 - **秘密の値も伏せない**(`"<redacted>"` への置き換えは行わない)。ただし、秘密の値の取得そのものが目的の API(読み取り専用ガードの拒否リストの操作。[AWS アクセス](../architecture/Architecture-AWS-Access.ja.md))は呼ばない
-  - 応答に含まれる値は、スナップショット、Rego の `input`、ルールが `actual` に入れた場合はレポートに、そのまま入る。スナップショットを外部に出さないこと(`yata collect` の注意)と、レポートを外部に出すときの `--omit-values` で扱う
+  - 応答に含まれる値は、スナップショット、Rego の `input` / `data`、ルールが `actual` に入れた場合はレポートに、そのまま入る。スナップショットを外部に出さないこと(`yata collect` の注意)と、レポートを外部に出すときの `--omit-values` で扱う
   - ルールの作者は、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない
 - **あるリソースと 1 対 1 で対応する情報は、呼び出す API が分かれていても 1 つのリソースにまとめる**
   - リソースごとに呼ぶ取得の操作(`GetBucketPolicy`、`GetTrailStatus` など)の出力を、操作のキーで一覧の操作と同じリソースに入れる形([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」)は、この原則の一つである
@@ -252,7 +254,7 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 - アタッチされているかの絞り込み(`AttachmentCount` が 1 以上か)と、AWS 管理ポリシーを対象にするか(`Arn` が `arn:aws:iam::aws:policy/` で始まるか)は、2.14 のルールで行う
 - 影響: どのアカウントでも、使われていない AWS 管理ポリシー(1,000 件を超える)も入る
   - `GetPolicyVersion` の呼び出しが、ポリシーの件数だけ(1,000 回を超えて)増える。IAM の API のスロットリングに当たりやすくなり、収集の時間が延びる
-  - スナップショットの `aws.iam.policy` のファイルと、2.14 の `input` が、AWS 管理ポリシーの文書の分だけ大きくなる
+  - スナップショットの `aws.iam.policy` のファイルと、2.14 の `data` が、AWS 管理ポリシーの文書の分だけ大きくなる
   - 呼び出しの並行数・スロットリングの際の再試行の扱いは、後続の Issue 4a で決める
 - `GetPolicyVersion` は、`ListPolicies` の `DefaultVersionId` の版を取る(`PolicyArn` と `VersionId` は必須の識別子)。値は出力全体(`{"PolicyVersion": {...}}`)で、`Document` は URL デコードしてから JSON にパースする([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」)
 - インラインポリシーは 2.14 の対象に含めない(未決事項)
@@ -265,7 +267,7 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 
 - `ListSubscriptionsByTopic` の値は出力全体(`{"Subscriptions": [...]}`。ページングの項目を除く)
 - 購読の `Endpoint`(メールアドレス、HTTP(S) の URL、電話番号など)も、伏せずにそのまま入れる(上の「コレクターの方針」)
-- 影響: 個人のメールアドレスや、URL に埋め込まれた認証情報(クエリ文字列のトークンなど)が、スナップショットと Rego の `input` に載る。ルールが `actual` に入れれば、レポートにも載る
+- 影響: 個人のメールアドレスや、URL に埋め込まれた認証情報(クエリ文字列のトークンなど)が、スナップショットと Rego の `input` / `data` に載る。ルールが `actual` に入れれば、レポートにも載る
 - 5.2、5.3 の判定には、確認済みの購読(`SubscriptionArn` が `PendingConfirmation` でない)があるかだけを使い、`Endpoint` を `actual` や `message` に入れない
 
 **`aws.ec2.instance`**
@@ -363,18 +365,17 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 
 - コレクターは見分けず、どちらも同じ形で入れる
 - ルールは、`configuration.DescribeTrails.HomeRegion` がリソースの `region` と同じならホームリージョンの証跡、違えば shadow trail と見分ける
-- 組織の証跡は `configuration.DescribeTrails.IsOrganizationTrail` が真で、ARN のアカウント ID は組織の証跡を作ったアカウントのもの(メンバーアカウントでも同じ ARN。[組織の証跡](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/creating-trail-organization.html))。ARN のアカウント ID と `input.account.id` を比べれば、別のアカウントが管理する証跡かが分かる
+- 組織の証跡は `configuration.DescribeTrails.IsOrganizationTrail` が真で、ARN のアカウント ID は組織の証跡を作ったアカウントのもの(メンバーアカウントでも同じ ARN。[組織の証跡](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/creating-trail-organization.html))。ARN のアカウント ID と `data.yata.context.account.id` を比べれば、別のアカウントが管理する証跡かが分かる
 
 #### 同じ ARN の証跡と `id`
 
-マルチリージョンの証跡は、同じ ARN で複数のリージョンの `ResourceSet` に現れます。`input` では種別ごとに全リージョンの配列にまとめるため、同じ `id` で `region` だけが違うリソースが並びます。全体設計の「`id` はリソースを一意に識別する値」と食い違うため、次のようにします。
+マルチリージョンの証跡は、同じ ARN で複数のリージョンの `ResourceSet` に現れます。`data` では種別ごとに全リージョンの配列にまとめるため、同じ `id` で `region` だけが違うリソースが並びます。全体設計の「`id` はリソースを一意に識別する値」と食い違うため、次のようにします。
 
 - `id` は、ホームリージョンの証跡も shadow trail も `TrailARN` のままにする
 - リソースの識別を「アカウント・リージョン・種別・`id` の組」とし、`id` が一意であるのは `ResourceSet` の中(アカウント × リージョン × 種別)とする。AWS が同じリソースを複数のリージョンに見せる場合に限り、同じ `id` が複数のリージョンに現れてよい。この変更を「全体設計への反映」に挙げる
-- 同じ `id` の複数のリソースのうち 1 つを検出の対象にできるよう、全体設計を次のように変える(「全体設計への反映」)
-  - `fail` の要素に、任意のキー `resource_region` を加える。指定すると、その `id` とリージョンのリソースだけの検出になる。省略すると、その `id` のすべてのリソースの検出になる(`id` が一意な種別のルールは書き方が変わらない)
-  - `resource_region` が文字列でない場合と、その `id` とリージョンの組のリソースが `target_type` に無い場合は、`resource_id` の誤りと同じく、そのルールの評価のエラー(`error`)にする
-  - フィクスチャの期待値 `expected.fail` の要素を、`id` の文字列か、`{"id": ..., "region": ...}` のオブジェクトで書けるようにする。オブジェクトはその `id` とリージョンのリソースだけが不合格になることを、文字列はその `id` のすべてのリソースが不合格になることを期待する。これにより、どのリージョンのコピーが `fail` か(`resource_region` を正しく付けたか)を `yata rules test` で確かめられ、案 B(ホームリージョンの証跡だけが `fail`)も期待値として書ける。同じ `id` を文字列とオブジェクトの両方で書く場合と、同じ `{id, region}` を重ねて書く場合は、フィクスチャの誤りとする(「重複なし」の読み方)
+- 同じ `id` の複数のリソースのうち 1 つを検出の対象にできるよう、次のように扱う(この設計の時点の全体設計の変更は「全体設計への反映」)
+  - (ADR-0030 の後)ルールはリソースごとに評価されるため([ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md))、同じ `id` のコピーもそれぞれ別のリソースとして評価され、別の結果になる。ルールは `input.region` でどのリージョンのコピーかが分かる。この設計の時点では、`fail` の要素に任意のキー `resource_region` を加えて 1 つのリソースを指す形にしていたが、ADR-0030 で廃止した
+  - フィクスチャの期待値 `expected.fail` の要素を、`id` の文字列か、`{"id": ..., "region": ...}` のオブジェクトで書けるようにする。オブジェクトはその `id` とリージョンのリソースだけが不合格になることを、文字列はその `id` のすべてのリソースが不合格になることを期待する。これにより、どのリージョンのコピーが `fail` か(ルールがコピーを正しく見分けたか)を `yata rules test` で確かめられ、案 B(ホームリージョンの証跡だけが `fail`)も期待値として書ける。同じ `id` を文字列とオブジェクトの両方で書く場合と、同じ `{id, region}` を重ねて書く場合は、フィクスチャの誤りとする(「重複なし」の読み方)
   - `incomplete_resources` の要素に `region` を加える
   - 結果の並び順を「重要度 → ルール ID → リソース ID → リージョン」にする
 - 全体設計([リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、[ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md)、[ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md))に加えるまでは、この節を根拠とする
@@ -392,12 +393,12 @@ shadow trail は、ホームリージョンの証跡の複製ですが、利用�
 | 5.2、5.3 | `aws.account.account` の 1 件 | 連なりの起点にどのコピーを使ってもよい。重複しても結果は 1 件 |
 
 - **案 A(推奨)**: すべてのコピーを同じ条件で判定する。設定はコピーの間で同じなので、ホームリージョンの証跡が `fail` なら、shadow trail も各リージョンで `fail` になる
-  - shadow trail の `fail` は `resource_region` にそのリージョンを入れ、`message` に shadow trail であることを書く(例: `"Shadow trail of <TrailARN> does not ..."`)。ホームリージョンは ARN に含まれるため、`message` に埋め込んでよいリソースの ID の範囲で利用者に分かる
+  - 各コピーは別のリソースとして評価され、`fail` の結果のリージョンがそのコピーのリージョンになる。shadow trail(`input.configuration.DescribeTrails.HomeRegion` が `input.region` と違う)の `message` には、shadow trail であることを書く(例: `"Shadow trail of <TrailARN> does not ..."`)。ホームリージョンは ARN に含まれるため、`message` に埋め込んでよいリソースの ID の範囲で利用者に分かる
   - 組織の証跡で、別のアカウントが管理するものは、`message` にそのことを書く(修正は組織の証跡を管理するアカウントで行う)
   - レポートでは、リソース ID(ARN。ホームリージョンを含む)とリージョンの列が違う行として現れ、table の既定の表示(`fail` だけ)でも shadow trail の存在が分かる
   - ホームリージョンが対象外(`--region`)でも、shadow trail で判定されるため、黙って見逃さない
   - 欠点: 1 つの証跡の設定の不備が、現れるリージョンの数だけの検出になり、集計の件数が増える
-- **案 B**: ホームリージョンの証跡だけを判定し、shadow trail は、ホームリージョンの証跡が `input` にあれば `pass`、無ければ(ホームリージョンが対象外の場合)同じ条件で判定する
+- **案 B**: ホームリージョンの証跡だけを判定し、shadow trail は、ホームリージョンの証跡が `data.aws.cloudtrail.trail` にあれば `pass`、無ければ(ホームリージョンが対象外の場合)同じ条件で判定する
   - 検出の重複は無いが、shadow trail は `pass` としてだけ現れる(JSON の `results[]` と、table の `--show-passed`)。ルールの書き方も案 A より複雑になる
 - どちらにするかは、ルールの Issue 6c で決める(未決事項「shadow trail の検出の見せ方」)
 
@@ -476,7 +477,7 @@ crates/yata-provider-aws/src/collectors/
 
 ## 全体設計への反映
 
-次の点は `docs/architecture/` の変更が必要です。この設計の PR では変更せず、後続の Issue(下の「後続の Issue」の 1)で単独の PR にします。
+次の点は `docs/architecture/` の変更が必要です。この設計の PR では変更せず、後続の Issue(下の「後続の Issue」の 1)で単独の PR にします。(この表のうち `fail` の要素の `resource_region` に関する変更は、その後 [ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で廃止しました。)
 
 | ページ | 変更 |
 | --- | --- |
@@ -507,7 +508,7 @@ crates/yata-provider-aws/src/collectors/
 | 4e | 監視のコレクター | `aws.cloudwatchlogs.metric_filter`、`aws.cloudwatch.metric_alarm`、`aws.sns.topic` | 2、P1 | 並行できる |
 | 4f | EC2/VPC のコレクター | `aws.ec2.security_group`、`aws.ec2.network_acl`、`aws.ec2.instance`、`aws.ec2.vpc`、`aws.ec2.flow_log`、`aws.ec2.ebs_encryption_default`。大きければネットワーク(前の 4 つ+フローログ)とそれ以外に分ける | 2(`crates/yata-provider-aws/Cargo.toml` への `aws-sdk-ec2` の追加を 2 でまとめて行うため)、P1 | 並行できる |
 | 5 | CIS v7.1.0 の本文の確認 | 番号・題名・自動化の区分を v7.1.0 の本文で確かめ、この設計書の表を直す | なし | すべてと並行できる |
-| 6a〜6e | ポリシーのリポジトリでのルールの作成 | セクションごとに分ける: IAM(9 件)、S3(2 件)、CloudTrail・ログ(5 件)、監視(2 件)、EC2/VPC(6 件)。共通の関数(IAM のポリシー文書の解析、CIDR とポートの判定、監視の連なりの判定)は、`lib/` の単独の PR を先に出す | 着手: P2、P3、対応するコレクターの機能設計書のマージ(構成情報の形が決まるため)。6c・6d・6e は P4 も。6c は、1 で決めた `resource_region` を P2 が実装していることも。公開: 5 の完了と、対応するコレクターを含む `yata` のリリースの後(マニフェストの `min_yata_version` を上げる) | セクションの間で並行できる |
+| 6a〜6e | ポリシーのリポジトリでのルールの作成 | セクションごとに分ける: IAM(9 件)、S3(2 件)、CloudTrail・ログ(5 件)、監視(2 件)、EC2/VPC(6 件)。共通の関数(IAM のポリシー文書の解析、CIDR とポートの判定、監視の連なりの判定)は、`lib/` の単独の PR を先に出す | 着手: P2、P3、対応するコレクターの機能設計書のマージ(構成情報の形が決まるため)。6c・6d・6e は P4 も。6c は、1 で決めた `resource_region` を P2 が実装していることも(ADR-0030 の後は、リソースごとの評価が実装されていること。6a〜6e のすべての前提になる)。公開: 5 の完了と、対応するコレクターを含む `yata` のリリースの後(マニフェストの `min_yata_version` を上げる) | セクションの間で並行できる |
 | 7 | 利用者ガイドへの記載 | 最小権限の案内(`yata permissions`、`SecurityAudit`)と、`iam:GenerateCredentialReport` を使うこと、その影響([ADR-0005](../adr/ADR-0005-Allow-GenerateCredentialReport-in-Read-Only-Guard.ja.md))を書く。P5 で決めた `permissions` の出力の示し方を反映する | 1、P5 | 4a〜6e と並行できる |
 
 ### 前提の Issue(この設計の範囲外)
@@ -515,7 +516,7 @@ crates/yata-provider-aws/src/collectors/
 | # | Issue | どの行の依存か |
 | --- | --- | --- |
 | P1 | AWS プロバイダの基盤(`Collector` トレイト、build.rs、クライアントの生成、読み取り専用ガード、`aws-config` などの依存) | 2、3、4a〜4f |
-| P2 | ポリシーエンジンと `yata rules test` の実装(フィクスチャでルールを確かめるため)。1 で決めた `id` の一意性の変更、`fail` の `resource_region`(誤りの扱いを含む)、`expected.fail` の `{id, region}` の形、`IncompleteResource` の `region` を含む | 6a〜6e |
+| P2 | ポリシーエンジンと `yata rules test` の実装(フィクスチャでルールを確かめるため)。1 で決めた `id` の一意性の変更、`fail` の `resource_region`(誤りの扱いを含む。ADR-0030 で廃止し、リソースごとの評価に置き換えた)、`expected.fail` の `{id, region}` の形、`IncompleteResource` の `region` を含む | 6a〜6e |
 | P3 | ポリシーのリポジトリの作成 | 6a〜6e |
 | P4 | 全体設計の Issue「全リージョンの判定と `--region`」(下の未決事項) | 6c、6d、6e |
 | P5 | `yata permissions` を実装する Issue(Describe / List / Get 以外の操作の示し方を決める。下の未決事項) | 7 |
@@ -555,12 +556,12 @@ crates/yata-provider-aws/src/collectors/
 | CIS v7.1.0 の本文の確認 | コントロールの番号・題名・自動化の区分・L1 / L2 を v7.1.0 の本文で確かめる。v7.1.0 の公開日も確かめる。v7.0.0 の 70 件以外のコントロールがあれば、含める・除くを決める。ルールはこの確認の後に `version` を `7.1.0` として公開する。本文を確認する手段が得られない場合に、v7.0.0 を対象として公開するかは、この Issue で決める。v7.1.0 で加わったコントロールを範囲に入れるために新しい SDK のサービスが要る場合は、Issue 2 とは別に、共有ファイル(ルートの `Cargo.toml`、`crates/yata-provider-aws/Cargo.toml`、`Cargo.lock`)の単独の PR を出す | 後続の Issue 5(ルールの公開の前) |
 | 操作の単位でのルールの状態 | 失敗の印の影響が、同じ種別を使うほかのルールにも及ぶ(「振る舞い」のエラー時)。ルールが使う操作をメタデータで宣言し、その操作の失敗だけで `incomplete` にするか。最初のリリースでは許容する | 最初のリリースの後、全体設計の Issue |
 | `yata permissions` での例外の操作の示し方 | 出力は IAM ポリシーの JSON で、注記を書く場所が無い。標準エラー出力に注意を出す、例外の操作を別の文(`Sid` で区別)に分ける、などから選ぶ。CLI の出力を変える場合は [CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) を更新する | `yata permissions` を実装する Issue(前提の P5) |
-| 全リージョンの判定と `--region` | `--region` で対象を絞ると、4.1・6.1.1 などの「全リージョン」の判定は対象のリージョンの範囲になり、対象外のリージョンの不備を見逃す。マルチリージョンの証跡は、ホームリージョンが対象外でも shadow trail として収集されるが、ホームリージョンが対象外のシングルリージョンの証跡は収集されない。ロググループのリージョンが対象外だと、5.2・5.3 の連なりをたどれず `fail` になる。アカウントで有効なリージョンの一覧を `input` に入れるか、レポートで注意を出すか | ルールの Issue(6c、6d、6e)の前に、全体設計の Issue(前提の P4)として決める |
+| 全リージョンの判定と `--region` | `--region` で対象を絞ると、4.1・6.1.1 などの「全リージョン」の判定は対象のリージョンの範囲になり、対象外のリージョンの不備を見逃す。マルチリージョンの証跡は、ホームリージョンが対象外でも shadow trail として収集されるが、ホームリージョンが対象外のシングルリージョンの証跡は収集されない。ロググループのリージョンが対象外だと、5.2・5.3 の連なりをたどれず `fail` になる。アカウントで有効なリージョンの一覧を `data.yata.context` に入れるか、レポートで注意を出すか | ルールの Issue(6c、6d、6e)の前に、全体設計の Issue(前提の P4)として決める |
 | レポートに行の無いユーザー | レポートの生成の後に作られたユーザーなど、行が無い場合に `GetCredentialReport` のキーを `null` にするか失敗の印にするか。黙って `pass` にしないことを優先する | 後続の Issue 4b |
 | 認証情報レポートの待ち方 | `GenerateCredentialReport` を呼び直す回数・間隔の上限(時間切れになった場合は、上の「認証情報レポート」のとおり失敗の印を置く) | 後続の Issue 4b |
 | shadow trail のイベントセレクターの取得 | `GetEventSelectors` を shadow trail の ARN で(別のリージョンをホームとする証跡、メンバーアカウントからの組織の証跡)呼んで取れるかは、API リファレンスに記述が無い(`GetTrailStatus` は取れることを確かめた)。確かめるには実際の AWS アカウントでの確認が要る。常に特定のエラーになると分かった場合に、そのエラーを失敗の印のままにするか(その場合、ルールの状態は種別の単位で決まるため、shadow trail がある環境では `aws.cloudtrail.trail` を使うすべてのルール(4.1・4.2・4.4・4.5・5.2・5.3)が常に `incomplete` になる)、別の扱いにするか | 後続の Issue 4d |
 | shadow trail の検出の見せ方 | 4.2・4.4・4.5 で、上の「結果の見せ方」の案 A(すべてのコピーを判定し、shadow trail であることを `message` に書く)と案 B(ホームリージョンの証跡だけを判定する)のどちらにするか。推奨は案 A | ルールの Issue(6c) |
-| 別のアカウントにある証跡の送り先 | 4.4 で証跡のバケットが、5.2・5.3 で証跡のロググループが、別のアカウント(集約用のアカウント、組織の証跡を作ったアカウント)にあり、`input` に無い場合の判定と `message` | ルールの Issue(6c、6d) |
+| 別のアカウントにある証跡の送り先 | 4.4 で証跡のバケットが、5.2・5.3 で証跡のロググループが、別のアカウント(集約用のアカウント、組織の証跡を作ったアカウント)にあり、`data` に無い場合の判定と `message` | ルールの Issue(6c、6d) |
 | 2.14 の対象 | AWS 管理ポリシー(`AdministratorAccess` など)のアタッチを `fail` にするか、カスタマー管理ポリシーだけにするか。アタッチされていないポリシーは、ルールで `AttachmentCount` を見て除く。インラインポリシーを対象にするか(対象にするなら `GetUserPolicy` などの収集を加える) | ルールの Issue(6a) |
 | 方針と食い違う既存の規則 | 全体設計のバイナリ(Blob)の項目を入れない規則を、「コレクターの方針」の例外として残すか、方針に合わせて改めるか。`aws.account.account` の構成情報を `GetCallerIdentity` の `Account` だけにする規則は、「コレクターの方針」の例外として残すため、この項目に含めない | 後続の Issue 1 |
 | `DescribeInstances` の予約の項目 | `aws.ec2.instance` で、予約(`Reservations[]` の要素)の `ReservationId`、`OwnerId`、`RequesterId`、`Groups` をどう入れるか(インスタンスの要素だけを入れると失われる)。予約とインスタンスは 1 対多で、「コレクターの方針」の 1 対 1 の情報をまとめる原則の対象ではない | 後続の Issue 4f |
