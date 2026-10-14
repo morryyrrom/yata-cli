@@ -6,6 +6,8 @@
 
 ルールの書式、読み込みの順序、失敗の種類と終了コード、結果の型、状態の判定順は [ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) で決まっています。この設計書はそれを繰り返さず、実装の具体(モジュールの構成、公開 API、エラーの型、処理の細部、資源の上限の値、regorus の設定、出力の形、テスト用のポリシーのセット)を決めます。入力の形は [リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、フィクスチャの形式は [ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md)、エンジンの選定は [ADR: ポリシーエンジン](../adr/ADR-0001-Policy-Engine-Rego-with-Regorus.ja.md)、コマンドとオプションは [CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) に従います。
 
+ルールの書式と評価の単位は、この設計の実装の後に [ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md)(Issue #30)で変わりました。`fail` を部分集合ルールから真偽値に変え、`target_type` のリソースごとに評価し、`input` を評価の対象のリソース、`data` をアカウントの全リソースにしました。`fail` の要素の `resource_id` / `resource_region` とその対応づけは廃止です。フィクスチャのキーを `input` から `data` に変え(中身は Rego の `data` と同じ形)、`rules test` の JSON の `unexpected[].messages` を `message` にしました。次の節は、その変更に合わせて直してあります(実装は #30 の実装の Issue で行う): 「ルール」の手順 6、「失敗の種類」、「資源の上限」の評価時間、「regorus の設定」、「評価時間の上限の実現方法」、「`input` と `data` の組み立て」、「リソースごとの評価と結果」、「リソースごとの評価の性能」、「フィクスチャの検証」、「フィクスチャの実行と比較」、「JSON の形式」、「エラーの型」、「テスト方針」、「実装時の確認事項」。「実装の段階」と「全体設計の変更」は、この設計の時点の計画の記録です。
+
 ## 目的と背景
 
 - ルールは別のリポジトリ(ポリシーのリポジトリ)で配布し、`yata` が実行時に読み込んで regorus で評価する。ポリシーのリポジトリでルールを書き始めるには、フィクスチャでルールを確かめる `yata rules test` が先に要る
@@ -17,12 +19,12 @@
   - 評価時のメモリの上限
   - Windows の junction などの reparse point の判定方法
   - ダミーとして認めるアカウント ID の一覧
-- 同じ `id` のリソースが複数のリージョンに現れる場合の扱い(リソースをアカウント・リージョン・種別・`id` で識別する、`fail` の `resource_region`、`expected.fail` の `{id, region}`、`IncompleteResource` の `region`)を実装に含める
+- 同じ `id` のリソースが複数のリージョンに現れる場合の扱い(リソースをアカウント・リージョン・種別・`id` で識別する、`fail` の `resource_region`(ADR-0030 で廃止)、`expected.fail` の `{id, region}`、`IncompleteResource` の `region`)を実装に含める
 
 ## スコープ
 
 - ポリシーのディレクトリの読み込み: 存在の確認、マニフェスト、互換性の規則、走査、資源の上限、ライブラリとルールの読み込み、メタデータの検証、失敗の集め方
-- Rego の評価: regorus のエンジンの設定、評価時間の上限、`input` の組み立て、`fail` の要素の解釈、リソースへの対応づけ、`RuleOutcome` の作成(状態の判定順、`incomplete_resources`)
+- Rego の評価: regorus のエンジンの設定、評価時間の上限、`input` と `data` の組み立て、リソースごとの評価と `fail` / `message` / `reason` の解釈、`RuleOutcome` の作成(状態の判定順、`incomplete_resources`)
 - `yata rules test`: マニフェスト、読み込みの検証、フィクスチャのそろい方と形式、ダミー値、フィクスチャの実行、プロバイダの対応の検査、text / JSON の出力、終了コード
 - `yata-core` の型: `Severity`、`RuleMetadata`、`Reference`、`PolicySetInfo`、`RuleOutcome`、`RuleStatus`、`SkipReason`、`RuleResult`、`ResultStatus`、`ResultResource`、`IncompleteResource`
 - テスト用の最小のポリシーのセット(`crates/yata-engine/tests/fixtures/policies/`、`crates/yata-cli/tests/fixtures/policies/`)
@@ -48,6 +50,7 @@
 | P3: ルールのテストの機能 | `yata-engine` の `testing`(フィクスチャの読み込み・検証、ダミー値、期待値の比べ方、実行、`TestReport`)、テスト用のポリシーのセットのフィクスチャの失敗のケース | フィクスチャに関するすべての失敗の種類と、`expected.fail` の文字列とオブジェクトの両方の形がテストで確かめられていること | P2 |
 | P4: `yata rules test` のコマンド | `yata-cli` の引数の解析(`rules test` のサブコマンド)、ポリシーのディレクトリの決定、ログの初期化、終了コード、中断、プロバイダの対応の検査、text / JSON の出力、CLI の統合テスト | `yata rules test` が正しいテスト用のセットで終了コード 0 になり、各失敗の種類で決めた終了コード(1 / 2)になること。JSON の出力が期待するファイルと一致すること | P3。#7 の実装の PR(`supported_resource_types()`) |
 
+- P2・P3 の完了条件のうち、`resource_region` と `fail` の要素に関するものは ADR-0030 で廃止した。リソースごとの評価で確かめることは、下の「テスト方針」の「確かめること」
 - P1 と P2 を分けるのは、P1 のコードは #7 の型を必要とせず、P2 は必要とするため。P1 のコードは #7 と並行して書いてよいが、PR は下の順序で作る
 
 ### 共有ファイルの順序
@@ -160,7 +163,8 @@
 4. ライブラリが 1 つ以上あれば、`eval_query("data")` を入力なしで 1 回呼び、モジュール全体の解析(未定義の関数の参照、安全でない変数など)のエラーを、ルールより先にライブラリの誤りとして見つける。regorus はルールの本体を評価するときに解析するため、`eval_query("true")` ではこれらのエラーが出ない(P1 で確認)
 5. 構文・解析のエラーは `library_invalid`(ディレクトリ全体の失敗)
 
-- 手順 3 は、`lib/` に置き間違えたルール(定数の `metadata` や、入力が無くても空の集合として定義される `fail` を持つもの)を見つけるための検査で、入力に依存する本体の `metadata` までは見つけられない
+- 手順 3 は、`lib/` に置き間違えたルール(定数の `metadata` や、`default fail := false` により入力が無くても定義される `fail` を持つもの)を見つけるための検査で、入力に依存する本体の `metadata` までは見つけられない
+- `message` と `reason` は、ライブラリにあっても失敗にしない。どちらも入力に依存するため入力なしの評価では見つけにくく、置き間違えたルールは `metadata` と `fail` で見つかる。また、エンジンはライブラリの `message` / `reason` を読まないため、ライブラリの関数・規則の名前を不必要に制限しない
 - 失敗の報告には、regorus のエラーのメッセージ(ファイルのパスと行を含む)を入れる
 
 ### ルール
@@ -172,7 +176,7 @@
 3. 戻り値のパッケージが `data.yata.rules.<ルール ID>` でなければ `package_mismatch`
 4. `data.yata.rules.<ルール ID>.metadata` を入力なしで `eval_rule` で評価する。解析のエラーは `rego_error`、時間切れは `rego_error`(メッセージで時間切れと示す)、未定義は `metadata_invalid`
 5. メタデータを検証して `RuleMetadata` にする(下の「メタデータの検証」)。誤りは `metadata_invalid`
-6. `data.yata.rules.<ルール ID>.fail` を入力なしで評価し、集合(空でもよい)でなければ `fail_missing`(未定義、または集合でない値)
+6. `data.yata.rules.<ルール ID>.fail` を入力なし(`set_input` も `add_data` もしない状態)で評価し、真偽値でなければ `fail_missing`(ルールに `fail` が無い、未定義、または真偽値でない値)。メッセージで原因を示す: ルールに `fail` が無い(`eval_rule` が `not a valid rule path` のエラー)なら `rule has no "fail"; add "default fail := false" and "fail if { ... }"`、未定義なら `fail is undefined without input; add "default fail := false"`、集合なら `fail must be a boolean rule; the partial set form "fail contains ..." is not supported`、それ以外の型なら `fail must be a boolean, but was <型>`(ADR-0030 で変更。変更前は集合であることを確かめていた)
 7. 読み込んだエンジンをルールとともに持つ(評価とフィクスチャの実行で複製して使う)
 
 #### メタデータの検証
@@ -226,14 +230,14 @@
 | `rego_error` | 読み込み | 構文・解析のエラー(regorus の行の長さ・行数の上限を含む)、UTF-8 でない、メタデータ・`fail` の確認中の時間切れ |
 | `package_mismatch` | 読み込み | パッケージ名とパスの不一致 |
 | `metadata_invalid` | 読み込み | メタデータの誤り |
-| `fail_missing` | 読み込み | `fail` が無い、または集合でない |
+| `fail_missing` | 読み込み | `fail` が無い、または入力なしで真偽値にならない(`default fail := false` が無い、部分集合ルールの書式など) |
 | `unsupported_resource_type` | `rules test`(`yata-cli`) | プロバイダが対応していない種別を宣言している |
 | `orphan_fixtures` | 読み込み(走査。`LoadMode::RulesWithFixtures` のときだけ) | 対応するルールの無い `.fixtures` ディレクトリ |
 | `fixtures_missing` | `rules test` | `pass_` か `fail_` のフィクスチャが無い(フィクスチャのディレクトリが無い場合を含む) |
 | `fixture_invalid` | `rules test` | フィクスチャの形式の誤り(下の「フィクスチャの検証」) |
 | `non_dummy_account_id` | `rules test` | ダミーとして認めていない 12 桁の数字がある |
 | `fixture_mismatch` | `rules test` | 評価の結果が `expected.fail` と一致しない |
-| `fixture_eval_error` | `rules test` | フィクスチャの評価のエラー(`fail` の要素の誤りを含む) |
+| `fixture_eval_error` | `rules test` | フィクスチャの評価のエラー(ルールの規約の誤り: `fail` が undefined・真偽値でない、`message` / `reason` の形の誤り、conflict を含む) |
 | `fixture_timeout` | `rules test` | フィクスチャの評価の時間切れ |
 
 ## 資源の上限
@@ -261,7 +265,7 @@
 | ファイル数(ポリシーのディレクトリごと) | 20,000 | 変えられない |
 | ディレクトリ数(ポリシーのディレクトリごと) | 5,000 | 変えられない |
 | 深さ | 10 | 変えられない |
-| 評価時間 | 30 秒(ルール × アカウントの 1 回の評価、フィクスチャ 1 つの評価、読み込み時のメタデータ・`fail` の確認の、それぞれ 1 回ごと) | `--policy-timeout <SECONDS>`(1〜3600 の整数) |
+| 評価時間 | 30 秒(ルール × アカウントの評価(リソースごとの評価の合計)、フィクスチャ 1 つの評価(同じく合計)、読み込み時のメタデータ・`fail` の確認の、それぞれ 1 回ごと。ADR-0030 で、リソースごとの評価の合計に掛けることを明記した) | `--policy-timeout <SECONDS>`(1〜3600 の整数) |
 
 - **評価時間だけをオプションにする**: 評価時間は、アカウントの大きさ(リソースの数)とルールの書き方で必要な長さが変わり、利用者の環境ごとに調整が要りうる。OPA・Trivy と同じく、オプションで変えられるようにする
 - **ほかの上限はオプションにしない**: ポリシーのディレクトリの大きさは、利用者のアカウントではなくポリシーのリポジトリで決まる。値は実際のポリシーのリポジトリより十分大きくとり(下の「値の根拠」)、上限は誤ったディレクトリ(ホームディレクトリなど)を指定したときに走査が終わらないことと、異常に大きなファイルを読むことを防ぐためのものにする。比べたツールにも、ファイル数・深さを変えるオプションは無い。オプションは後から足しても互換性を壊さないため、必要になった時点で足す
@@ -285,11 +289,11 @@
 | 設定 | 値 | 理由 |
 | --- | --- | --- |
 | Rego のバージョン | v1(regorus の既定。`set_rego_v0` を呼ばない) | 全体設計のとおり |
-| 実行時間の制限 | `set_execution_timer_config(ExecutionTimerConfig { limit: policy_timeout, check_interval: 64 })` | 下の「評価時間の上限の実現方法」 |
+| 実行時間の制限 | `set_execution_timer_config(ExecutionTimerConfig { limit: policy_timeout, check_interval: 64 })`。リソースごとの評価では、`eval_rule` の呼び出しの前に `limit` を残りの時間に設定し直す | 下の「評価時間の上限の実現方法」 |
 | `print` の出力 | `set_gather_prints(true)`。評価のたびに `take_prints()` で取り出し、`debug` のログに出す(ルール ID を付ける) | 全体設計の「(e) regorus の組み込み関数」 |
 | 組み込み関数のエラー | `set_strict_builtin_errors(false)`(既定のまま) | OPA の既定と同じく、組み込み関数のエラー(例: `time.parse_rfc3339_ns` に `"N/A"` を渡した)を undefined として扱う。厳格にすると、認証情報レポートの `"N/A"` のような値で、ルール全体が `error` になる |
 | ポリシーの長さ | `PolicyLengthConfig` の既定 | 上の「資源の上限」 |
-| `data` | 使わない(`add_data` を呼ばない) | [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」 |
+| `data` | ルール × アカウント(フィクスチャでは 1 つのフィクスチャ)ごとに、`add_data` で 1 回入れる(ADR-0030 で変更。変更前は使わなかった) | 下の「`input` と `data` の組み立て」、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」 |
 
 - 組み込み関数のエラーを undefined として扱うと、その本体は成り立たず、リソースは黙って `pass` になりうる。これはルールの書き方の注意([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「書き方の注意」)と同じ性質で、フィクスチャで確かめる
 
@@ -337,6 +341,13 @@ regorus 0.12.0 のソースで次を確かめ、`set_execution_timer_config` で
 - `check_interval` は 64 とする。時計を読む回数を減らしつつ、打ち切りの遅れを文 64 個分に抑える。性能を測って変えてよい(実装の細部)
 - 時間切れのエラーは `anyhow::Error` で返るため、`downcast_ref::<regorus::LimitError>()` で見分け、`EvaluationError::Timeout` にする(見分けられない場合の扱いは下の「実装時の確認事項」)
 
+**リソースごとの評価での上限の掛け方**(ADR-0030 で追加): 上限は、ルール × アカウント(フィクスチャでは 1 つのフィクスチャ)の、リソースごとの評価の合計に掛けます。`eval_rule` は呼び出しのたびにタイマーを開始し直すため、そのままではリソースごと(`eval_rule` の呼び出しごと)の上限になります。次のようにします。
+
+- ルール × アカウントの評価を始めるときに、開始の時刻を記録する(`std::time::Instant`)。開始からの経過時間には、`add_data` と、最初の `eval_rule` での解析(regorus のタイマーの計測の外)の時間も含める
+- `eval_rule` を呼ぶたびに、その前に「残りの時間 = 上限 − 開始からの経過時間」を求め、`set_execution_timer_config(ExecutionTimerConfig { limit: 残りの時間, check_interval: 64 })` で設定し直す。残りが 0 以下なら呼ばずに `Timeout` にする
+- `set_execution_timer_config` は設定を置き換えるだけで、エンジンの再準備(解析のやり直し)を起こさない(regorus 0.12.0 のソースで確認。`prepared` を変えない)
+- 時間切れの `Timeout { limit }` の `limit` は、残りの時間ではなく `--policy-timeout` の値にする(利用者に見せる上限)
+
 **打ち切れないもの**: 確認は文の単位なので、1 回の組み込み関数の呼び出し(例: `net.cidr_expand("0.0.0.0/0")` で約 43 億件のアドレスを作る、`numbers.range` で巨大な配列を作る)の途中では止まりません。この場合は時間の上限が効かず、メモリを使い尽くすことがあります。
 
 - 別スレッドで評価しても、Rust ではスレッドを外から止められず、計算とメモリの消費は続く。結果を捨てるだけで資源の問題は解決しないため、採らない
@@ -352,14 +363,18 @@ regorus の `allocator-memory-limits` の機能では制限しません。ファ
 - 確認は時間の上限と同じく文の単位で、上の「打ち切れないもの」と同じく 1 回の組み込み関数の呼び出しの途中では止まらない
 - 大規模アカウントでのメモリの使い方は、全体設計の未決事項「大規模アカウントでのメモリ使用量」で扱う
 
-### `input` の組み立て
+### `input` と `data` の組み立て
 
-`yata-engine` は、ルール × アカウントごとに、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」の形の `input` を `serde_json::Value` で作り、`regorus::Value` に変換して `set_input` で渡します。
+(ADR-0030 で変更。変更前はルール × アカウントごとに 1 つの `input` を作り、`data` は使わなかった。)
 
-- `account`: そのアカウントの `AccountInfo`
-- `regions`: `Inventory.regions`
-- 宣言した種別(`target_type` と `related_types`)ごとに、そのアカウントの収集済みの `ResourceSet` の `resources` を 1 つの配列にまとめ、`(id, region)` の昇順に並べて、`<provider>.<service>.<resource>` の入れ子の位置に置く
+`yata-engine` は、ルール × アカウントごとに、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ポリシーエンジンへの渡し方」の形の `data` を作り、`add_data` で 1 回入れます。`target_type` のリソースごとに、そのリソースを `set_input` で `input` にします。
+
+- `data.yata.context.account`: そのアカウントの `AccountInfo`
+- `data.yata.context.regions`: `Inventory.regions`
+- `data.<provider>.<service>.<resource>`: 宣言した種別(`target_type` と `related_types`)ごとに、そのアカウントの収集済みの `ResourceSet` の `resources` を 1 つの配列にまとめ、`(id, region)` の昇順に並べて置く
 - 収集済みの組が 0 件の種別は空の配列を置く。未収集・失敗の組の扱いは下の「状態の判定」
+- `input`: `data` の `target_type` の配列の要素を、そのまま(`regorus::Value` を複製して)使う。`Value` は参照カウントで中身を共有するため、複製は配列の要素の参照を増やすだけで済む
+- `serde_json::Value` から `regorus::Value` への変換は、(アカウント, 種別)ごとに 1 回にし、その種別を宣言したルールの間で共有してよい(性能の細部。実装時に決めてよい)
 
 ### 状態の判定
 
@@ -368,33 +383,74 @@ regorus の `allocator-memory-limits` の機能では制限しません。ファ
 - 種別ごとの「対象の組」: `Inventory.resource_types` にその種別が無ければ、すべての組を未収集とする。あれば、`global` の種別は(アカウント, `global`)、`regional` の種別は(アカウント, `Inventory.regions` の各リージョン)を対象の組とする
 - 組ごとの状態: `Inventory.resource_sets` に組があれば収集済み、`Inventory.collection_errors` にあれば失敗、どちらにも無ければ未収集
 - 判定順の 1〜2(`skipped`)に当たれば評価しない。3 以降は評価してから決める
-- `incomplete_resources`: `input` に入れた、宣言したすべての種別のリソースについて、`configuration` の各キーの値が、キーが `yata_error` だけのオブジェクトであれば、`IncompleteResource { resource_id, resource_type, region, operation: キー, kind: yata_error.kind }` を作る。`kind` が文字列でなければ `"unknown"` にする。(種別, `id`, `region`, 操作名)の昇順に並べる
+- `incomplete_resources`: `data` に入れた、宣言したすべての種別のリソースについて、`configuration` の各キーの値が、キーが `yata_error` だけのオブジェクトであれば、`IncompleteResource { resource_id, resource_type, region, operation: キー, kind: yata_error.kind }` を作る。`kind` が文字列でなければ `"unknown"` にする。(種別, `id`, `region`, 操作名)の昇順に並べる
 - 状態が `skipped` / `error` のときは、`results` と `incomplete_resources` を空にする
 
-### `fail` の要素の解釈
+### リソースごとの評価と結果
 
-`data.yata.rules.<ルール ID>.fail` を `eval_rule` で評価し、次の順に確かめます。誤りはすべて `EvaluationError`(ルールの状態 `error`)にし、最初に見つけた誤りで止めます。
+(ADR-0030 で変更。変更前は `fail` の集合の要素を解釈し、`resource_id` / `resource_region` で `target_type` のリソースに対応づけていた。)
 
-1. 評価のエラー: 時間切れは `Timeout`、それ以外は `Engine`(regorus のメッセージ)
-2. 値が集合でない(未定義を含む): `FailNotSet`
-3. 各要素(regorus の集合の順)がオブジェクトで、次を満たす。満たさなければ `InvalidFailElement`(要素の位置と理由)
-   - `resource_id`: 文字列(必須)
-   - `message`: 文字列(必須)
-   - `resource_region`: 無いか文字列
-   - `path`: 無いか、JSON Pointer(RFC 6901)の形の文字列。空の文字列か `/` で始まり、`~` の後が `0` か `1` であること
+図: [リソースごとの評価の流れ](../diagrams/Diagram-0030-Per-Resource-Evaluation.md)
+
+ルール × アカウントごとに、ルールのエンジンを `clone()` し、`add_data` で `data` を入れた後、`target_type` のリソースを `(id, region)` の昇順に回して、リソースごとに次を行います。誤りはすべて `EvaluationError`(ルールの状態 `error`)にし、最初に見つけた誤りで、そのルール × アカウントの評価を止めます。エラーには、エラーが起きたリソースの `id` とリージョンを持たせます。
+
+1. `set_input` で `input` をそのリソースにする
+2. `data.yata.rules.<ルール ID>.fail` を `eval_rule` で評価する
+   - 評価のエラー: 時間切れは `Timeout`、それ以外(conflict を含む)は `Engine`(regorus のメッセージ)
+   - 未定義(`Value::Undefined`。ルールに `fail` が無いときの `not a valid rule path` のエラーを含むが、読み込み時に確かめているので通常は起きない): `FailUndefined`
+   - 真偽値でない: `FailNotBoolean`(型の名前を持つ)
+3. `false` なら `pass` の `RuleResult` を作り、次のリソースへ進む
+4. `true` なら、`data.yata.rules.<ルール ID>.message` を `eval_rule` で評価する
+   - ルールに `message` が無い(`not a valid rule path` のエラー)、または未定義: メタデータの `title` を使う
+   - 評価のエラー: 2 と同じ
+   - 空でない文字列でない: `InvalidMessage`(型の名前、または空であること)
+5. `data.yata.rules.<ルール ID>.reason` を `eval_rule` で評価する
+   - ルールに `reason` が無い、または未定義: `path`・`actual`・`expected` は `None`
+   - 評価のエラー: 2 と同じ
+   - オブジェクトでない: `InvalidReason`
+   - `path`: 無いか、JSON Pointer(RFC 6901)の形の文字列。空の文字列か `/` で始まり、`~` の後が `0` か `1` であること。満たさなければ `InvalidReason`
    - `actual`・`expected`: 無いか、任意の値(`null` を含む)
    - 知らないキーは無視する
-4. リソースへの対応づけ(下)。対応するリソースが無ければ `UnknownResource`
+6. `fail` の `RuleResult` を作る。`message` は 4 の値、`path`・`actual`・`expected` は 5 の値(`actual` / `expected` の無いものは `None`、`null` のものは `Some(Value::Null)`)
 
-`resource_region` と `path` に `null` を書いた場合は、文字列でないので誤りとします(`actual` / `expected` の `null` は「値が `null`」という意味を持つため区別する)。
+- `path` に `null` を書いた場合は、文字列でないので誤りとする(`actual` / `expected` の `null` は「値が `null`」という意味を持つため区別する)
+- `eval_rule` の呼び出しの前には、残りの時間を制限に設定する(上の「リソースごとの評価での上限の掛け方」)
+- `take_prints()` は `eval_rule` の呼び出しごとに取り出し、ルール ID とリソースの `id` を付けて `debug` のログに出す
+- `target_type` の配列に `(id, region)` の組が同じリソースが 2 つ以上あれば、評価の前に `DuplicateResource`(`error`。`Inventory` の検証で起きないはずの状態を、念のため確かめる)
+- `target_type` のリソースが 0 件なら、`add_data` も評価もしない
+- `EvaluationError` の `Display`(`RuleOutcome.error` に入れる 1 行の説明)のうち `yata-engine` が作る部分には、ルールが返した値を入れず、型の名前だけを入れる。例は [ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「評価のエラー」
+- `Engine` の `message`(regorus のメッセージ)は値を含みうる(例: 関数の conflict の `function produced multiple outputs ...`)。加工せずに持ち、`EvaluationError` に種類を返す `kind()` と、regorus のメッセージを除いた説明(`yata-engine` が作る説明とリソースの `id`・リージョン。値を含まない)を返す関数を用意する
+- 種類(`kind()`)と variant の対応:
+  - `Timeout` → `timeout`
+  - `Engine` で、regorus のメッセージが完全ルール・関数の conflict のもの(`rules should not produce multiple outputs`、`complete rules should not produce multiple outputs`、`function produced multiple outputs` など。文言で見分ける)→ `conflict`
+  - `Engine` のそれ以外 → `engine`
+  - `FailUndefined`、`FailNotBoolean`、`InvalidMessage`、`InvalidReason`(`path` の形の誤りを含む)→ `type`(ルールの規約の誤り)
+  - `DuplicateResource` → `internal`(エンジンに渡した入力の誤り。`Inventory` の検証で起きないはずの状態)
+- ログ([エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md) の「ルールの評価のエラーのログ」と同じ):
 
-### リソースへの対応づけと結果
+| レベル | 内容 |
+| --- | --- |
+| `warn` | ルール ID と種類(`kind()`)だけ |
+| `debug` | 加えて、リソースの `id` とリージョン、`yata-engine` が作る説明、regorus のメッセージの全文 |
 
-- 対応づけの対象は、`input` の `target_type` の配列のリソース。`(id, region)` の組が同じリソースが 2 つ以上あれば、`DuplicateResource`(`error`。`Inventory` の検証で起きないはずの状態を、念のため確かめる)
-- `resource_region` がある要素: `id` と `region` が一致するリソース 1 つに対応づける。無ければ `UnknownResource`
-- `resource_region` が無い要素: `id` が一致するすべてのリソースに対応づける。1 つも無ければ `UnknownResource`
-- `target_type` のリソースを `(id, region)` の昇順に回し、対応づいた要素があれば要素ごとに `fail` の `RuleResult`、無ければ `pass` の `RuleResult` を 1 つ作る。1 つのリソースに対応づいた要素の順は、regorus の集合の順(値の順)とする
-- `RuleResult` の `message`・`path`・`actual`・`expected` は要素から写す(`actual` / `expected` の無いものは `None`、`null` のものは `Some(Value::Null)`)
+- `--omit-values` のときの `RuleOutcome.error` は、regorus のメッセージだけを省き、`yata-engine` が作る説明(リソースの `id`・リージョンを含む)は残す。反映はレポートを組み立てる `yata-cli` / `yata-report` の側で行う
+
+### リソースごとの評価の性能
+
+(ADR-0030 で追加。)
+
+regorus 0.12.0 のソースで次を確かめました。
+
+- `set_input` は入力を置き換えるだけで、エンジンの再準備(モジュールの解析、規則の収集、ループの巻き上げの表の作成)を起こさない。`add_data` は再準備を起こす(`prepared = false`)。このため、`data` をルール × アカウントごとに 1 回入れ、リソースごとに `input` だけを替える
+- `eval_rule` は呼び出しのたびに評価の状態を初期化する(`clean_internal_evaluation_state`: `data` の作業用の複製、評価済みの規則の記録 `processed`、規則の値 `rule_values`、組み込み関数のキャッシュ `builtins_cache` を消す)。評価をまたいだ規則の値のキャッシュは無く、`data` だけに依存する補助のルールもリソースごとに計算し直される
+- `data` の作業用の複製と `input` の差し替えは、`Value` が参照カウントで中身を共有するため、データの大きさによらず軽い
+
+見積もり(実装時に測って確かめる):
+
+- 1 回の評価の固定の費用(状態の初期化と `eval_rule` の準備)は小さく、単純なルール(`input` の数項目を見るもの)の 1 回の評価は数十マイクロ秒程度と見込む。100 ルール × 1 万リソースで 100 万回の評価なら、1 つのスレッドで数十秒程度になりうる。これまでの書式でもルールの本体はリソースの数だけ回っていたため、増えるのは主に評価ごとの固定の費用
+- `fail` が `true` のリソースでは、`eval_rule` を最大 3 回(`fail`、`message`、`reason`)呼ぶ。評価のたびにキャッシュが消えるため、`message` / `reason` が参照する補助のルール(`fail` と共有するものを含む)は、その評価で計算し直される。不合格のリソースの評価の費用は、合格のリソースの最大 3 倍程度になる
+- `data` の配列を走査するルールは、計算量が「対象のリソースの数 × 走査するリソースの数」になる(例: ユーザー 1,000 × ポリシー 1,000 で 100 万回の比較)。最初のルール群では、`target_type` が `aws.account.account`(1 件)や証跡(少数)のルールが `data` を走査し、件数の多い種別(ユーザー、セキュリティグループなど)のルールはほぼ `input` だけで判定するため、上限(ルール × アカウントで 30 秒)に収まる見込み
+- 遅い場合の手段: ルールの評価の並列化(全体設計の「評価」。未決事項)、`data` だけに依存する計算の共有([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の未決事項)
 
 ### 公開する評価の関数
 
@@ -404,8 +460,8 @@ regorus の `allocator-memory-limits` の機能では制限しません。ファ
 pub fn evaluate(rules: &[&Rule], inventory: &Inventory) -> Vec<RuleOutcome>;
 ```
 
-- 評価ごとに、ルールが持つエンジンを `clone()` して使う(`&Rule` を変更しないため)
-- ルールの状態のエラーは `RuleOutcome.error` に、英語の 1 行の説明(`EvaluationError` の `Display`)として入れる
+- ルール × アカウントごとに、ルールが持つエンジンを `clone()` して使う(`&Rule` を変更しないため。リソースごとには `clone()` せず、`set_input` で `input` だけを替える)
+- ルールの状態のエラーは `RuleOutcome.error` に、英語の 1 行の説明(`EvaluationError` の `Display`)として入れる。あわせて、エラーの種類と、regorus のメッセージを除いた説明も `RuleOutcome` に持たせる(`--omit-values` とログのため。項目名は実装時に決めてよい)
 
 ## `yata rules test`
 
@@ -420,7 +476,7 @@ yata rules test [--policy-dir <DIR>]... [--format <text|json>] [--policy-timeout
 | --- | --- | --- |
 | `--policy-dir <DIR>`(複数指定可) | `YATA_POLICY_DIR`。どちらも無ければ終了コード 2 | 全体設計のとおり |
 | `--format <text\|json>` | `text` | 標準出力の形式 |
-| `--policy-timeout <SECONDS>` | 30 | 1 つの評価の時間の上限(1〜3600) |
+| `--policy-timeout <SECONDS>` | 30 | フィクスチャ 1 つの評価(リソースごとの評価の合計)の時間の上限(1〜3600) |
 
 - 出力はいつも標準出力に書く。ファイルに書くときはシェルのリダイレクトを使う(`--output` は設けない)
 - `--format` の値は、`scan` の `table` / `json` / `sarif` とは別のものにする。テストの結果は表ではなく、項目ごとの失敗の一覧なので、`table` ではなく `text` とする
@@ -456,12 +512,15 @@ yata rules test [--policy-dir <DIR>]... [--format <text|json>] [--policy-timeout
 [ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md) の「フィクスチャの形式」と [ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「期待値の比べ方」の誤りに、次の細部を加えます。どれも `fixture_invalid` です。
 
 - ファイルが JSON のオブジェクトでない。`description` があって文字列でない
-- `input` が無い、またはオブジェクトでない
-- `input.account` が `AccountInfo` の形(`account`・`id`・`provider` の文字列)でない。`input.regions` が文字列の配列でない
-- `input` の最上位に、`account`、`regions`、ルールのプロバイダ(`target_type` の最初の部分)以外のキーがある
+(ADR-0030 で、フィクスチャのキーを `input` から `data` に変え、中身を Rego の `data` と同じ形にした。)
+
+- `data` が無い、またはオブジェクトでない。最上位にキー `input` がある場合は、変更前の形式であることをメッセージで示す(`fixture uses the old "input" key; rename it to "data" and move account and regions under data.yata.context`)
+- `data` の最上位に、`yata` とルールのプロバイダ(`target_type` の最初の部分)以外のキーがある
+- `data.yata` がオブジェクトでない、または `context` 以外のキーがある。`data.yata.context` がオブジェクトでない、または `account` と `regions` 以外のキーがある(`data.yata` の下はエンジンが入れる名前のため)
+- `data.yata.context.account` が `AccountInfo` の形(`account`・`id`・`provider` の文字列)でない。`data.yata.context.regions` が文字列の配列でない
 - 宣言した種別(`target_type` と `related_types`)の配列が無い、または配列でない
-- **宣言していない種別の配列がある**(例: `related_types` に書いていない `input.aws.s3.bucket`)。実際の評価ではエンジンは宣言した種別しか `input` に入れないため、宣言を忘れたルールがフィクスチャでだけ通るのを防ぐ
-- 配列の要素が `Resource` の形(`id`・`type`・`account`・`region` が文字列、`configuration` がオブジェクト、`name` が無いか文字列、`tags` が無いか文字列の値のオブジェクト)でない。`type` がその配列の種別と違う。`account` が `input.account.account` と違う
+- **宣言していない種別の配列がある**(例: `related_types` に書いていない `data.aws.s3.bucket`)。実際の評価ではエンジンは宣言した種別しか `data` に入れないため、宣言を忘れたルールがフィクスチャでだけ通るのを防ぐ
+- 配列の要素が `Resource` の形(`id`・`type`・`account`・`region` が文字列、`configuration` がオブジェクト、`name` が無いか文字列、`tags` が無いか文字列の値のオブジェクト)でない。`type` がその配列の種別と違う。`account` が `data.yata.context.account.account` と違う
 - 同じ種別の配列に `(id, region)` の組が同じリソースが複数ある
 - `expected` が無い、またはオブジェクトでない。`expected.fail` が無い、または配列でない
 - `expected.fail` の要素の誤り(全体設計の「期待値の比べ方」に挙げたもの)
@@ -490,9 +549,9 @@ yata rules test [--policy-dir <DIR>]... [--format <text|json>] [--policy-timeout
 
 ### フィクスチャの実行と比較
 
-1. フィクスチャの `input` の宣言した種別の配列を `(id, region)` の昇順に並べ替える(実際の評価と同じ順にするため)
-2. ルールのエンジンを `clone()` し、`input` を渡して、上の「`fail` の要素の解釈」「リソースへの対応づけと結果」と同じ関数で、`fail` になったリソースの `(id, region)` の集合を作る。時間切れは `fixture_timeout`、それ以外の `EvaluationError` は `fixture_eval_error`
-3. `expected.fail` から期待する集合を作り(全体設計の「期待値の比べ方」)、比べる。違えば `fixture_mismatch`。詳細に、期待したが不合格にならなかったもの(`missing`)と、期待しなかったが不合格になったもの(`unexpected`。ルールの `message` を付ける)を入れる
+1. フィクスチャの `data` の宣言した種別の配列を `(id, region)` の昇順に並べ替える(実際の評価と同じ順にするため)
+2. (ADR-0030 で変更)ルールのエンジンを `clone()` し、フィクスチャの `data` をそのまま `add_data` で入れて([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「フィクスチャの評価」)、上の「リソースごとの評価と結果」と同じ関数で `target_type` のリソースごとに評価し、`fail` になったリソースの `(id, region)` の集合を作る。評価時間の上限はフィクスチャ 1 つの評価の合計に掛ける。時間切れは `fixture_timeout`、それ以外の `EvaluationError` は `fixture_eval_error`(メッセージにリソースの `id` とリージョンを含む)
+3. `expected.fail` から期待する集合を作り(全体設計の「期待値の比べ方」)、比べる。違えば `fixture_mismatch`。詳細に、期待したが不合格にならなかったもの(`missing`)と、期待しなかったが不合格になったもの(`unexpected`。結果の `message` を付ける)を入れる
 
 - フィクスチャでは、状態(`incomplete` など)は比べない(ADR のとおり)
 - 評価の `print` の出力は、ほかの評価と同じく `debug` のログに出す
@@ -554,7 +613,7 @@ test result: FAILED. 1 passed; 2 failed; 3 failures (fixtures: 4 passed, 1 faile
 
 ### JSON の形式
 
-機械処理のための形式です。`schema_version` は互換性の無い変更(項目の削除・意味の変更)のときに上げ、項目の追加では上げません。
+機械処理のための形式です。`schema_version` は互換性の無い変更(項目の削除・意味の変更)のときに上げ、項目の追加では上げません。ADR-0030 で `unexpected[].messages`(配列)を `message`(文字列)に変えましたが、`yata rules test` の JSON はまだリリースしていないため `1` のままにしています。
 
 ```json
 {
@@ -618,7 +677,7 @@ test result: FAILED. 1 passed; 2 failed; 3 failures (fixtures: 4 passed, 1 faile
           {
             "id": "arn:aws:s3:::other-bucket",
             "region": "us-east-1",
-            "messages": ["Bucket arn:aws:s3:::other-bucket does not block public ACLs"]
+            "message": "Bucket arn:aws:s3:::other-bucket does not block public ACLs"
           }
         ]
       }
@@ -662,7 +721,7 @@ test result: FAILED. 1 passed; 2 failed; 3 failures (fixtures: 4 passed, 1 faile
 
 | `kind` | `details` |
 | --- | --- |
-| `fixture_mismatch` | `missing`: `{id, region}` の配列。`unexpected`: `{id, region, messages}` の配列。どちらも `(id, region)` の昇順 |
+| `fixture_mismatch` | `missing`: `{id, region}` の配列。`unexpected`: `{id, region, message}` の配列(`message` は結果の `message` の文字列)。どちらも `(id, region)` の昇順。ADR-0030 で、1 つのリソースに結果が 1 件になったため、`messages`(配列)を `message`(文字列)に変えた |
 | `non_dummy_account_id` | `locations`: JSON Pointer の文字列の配列(値は出さない) |
 | `unsupported_resource_type` | `types`: 対応していない種別の文字列の配列 |
 | `fixture_timeout` | `timeout_seconds`: 上限の秒数 |
@@ -701,8 +760,8 @@ crates/yata-engine/
 │   ├── rule.rs              # Rule とルールの読み込み・検証
 │   ├── metadata.rs          # メタデータの取り出しと検証(RuleMetadata への変換)
 │   ├── loader.rs            # load_policies、LoadOptions、LoadMode、LoadedPolicies、PolicySet
-│   ├── input.rs             # Inventory からの input の組み立て(P2)
-│   ├── findings.rs          # fail の要素の解釈とリソースへの対応づけ(P2。testing と共有)
+│   ├── input.rs             # Inventory からの data の組み立て(P2。ADR-0030 で input から data に変更)
+│   ├── findings.rs          # リソースごとの評価と fail / message / reason の解釈(P2。testing と共有。ADR-0030 で fail の要素の解釈から変更。名前は実装時に変えてよい)
 │   ├── evaluate.rs          # evaluate、状態の判定、incomplete_resources(P2)
 │   ├── testing.rs           # testing のモジュールの宣言(P3)
 │   └── testing/
@@ -841,17 +900,26 @@ pub struct RuleFailure {
 #[non_exhaustive] pub enum FailureDetails { Mismatch { .. }, Locations { .. }, Types { .. }, Timeout { .. } }
 
 /// Error while evaluating one rule (rule status `error`).
+/// Variants changed by ADR-0030 (per-resource evaluation).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum EvaluationError {
-    Timeout { limit: Duration },
-    Engine { message: String },
-    FailNotSet,
-    InvalidFailElement { index: usize, reason: String },
-    UnknownResource { resource_id: String, region: Option<String> },
+    /// `resource` is the resource being evaluated when the limit was hit, if any.
+    Timeout { limit: Duration, resource: Option<ResourceKey> },
+    Engine { message: String, resource: ResourceKey },
+    FailUndefined { resource: ResourceKey },
+    FailNotBoolean { found: &'static str, resource: ResourceKey },
+    InvalidMessage { reason: String, resource: ResourceKey },
+    InvalidReason { reason: String, resource: ResourceKey },
     DuplicateResource { resource_id: String, region: String },
 }
+
+/// `(id, region)` of the target resource an evaluation error belongs to.
+pub struct ResourceKey { pub id: String, pub region: String }
 ```
+
+- `FailNotSet`、`InvalidFailElement`、`UnknownResource` は ADR-0030 で廃止した
+- `found` と `reason` には型の名前と規則の説明だけを入れ、ルールが返した値は入れない
 
 - 種類の enum は `serde` で snake_case の文字列にする(JSON の `kind`)
 - `PolicyLoadError` は、全体設計の [エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md) の `PolicyLoadError` に当たる。ルール単位の失敗は、`rules test` で 1 にするため、エラーの型ではなく `RuleFailure` の一覧で返す
@@ -951,7 +1019,7 @@ policies/
 │   │       ├── deep_rule.rego                # 複数の階層
 │   │       └── deep_rule.fixtures/...
 │   └── regional/
-│       ├── trail_region.rego                 # 同じ id が複数のリージョンに現れる種別。resource_region を付けた要素と付けない要素を返す
+│       ├── trail_region.rego                 # 同じ id が複数のリージョンに現れる種別。input.region で一部のリージョンのコピーだけを fail にする(ADR-0030 で変更)
 │       └── trail_region.fixtures/            # expected.fail の文字列の形とオブジェクトの形の両方
 ├── dir_failures/<case>/                      # ディレクトリ全体の失敗。1 ケース 1 ディレクトリ
 │   ├── manifest_missing/
@@ -976,17 +1044,19 @@ policies/
     ├── rego_error/slow_metadata.rego         # 入力に依存しない重い計算で metadata を作る。読み込み時の時間切れが rego_error になること
     ├── package_mismatch/wrong_package.rego
     ├── metadata/{missing_key, bad_severity, bad_type, related_other_provider, related_has_target, input_dependent}.rego
-    ├── fail_missing/no_fail.rego、fail_missing/complete_rule.rego
-    ├── fail_element/{region_not_string, unknown_id_region, unknown_id, missing_message, bad_path}.rego (+ fixtures)
+    ├── fail_missing/{no_fail, no_default, partial_set, not_boolean}.rego   # ADR-0030 で変更: default の無い fail、fail contains の書式、入力なしで真偽値でない fail
+    ├── rule_contract/{undefined_at_runtime, fail_not_boolean, fail_conflict, message_not_string, message_empty, message_conflict, reason_not_object, reason_bad_path, reason_path_null}.rego (+ fixtures)   # ADR-0030 で fail_element から置き換え。fixture_eval_error になること
     ├── expected/{dup_string, dup_object, string_and_object, object_missing_region, region_not_string, unknown_id, unknown_id_region}.rego (+ fixtures)
-    ├── fixture_format/{input_dup_id_region, missing_declared_type, undeclared_type, bad_resource, pass_with_fail, fail_without_fail, unknown_file}.rego (+ fixtures)
+    ├── fixture_format/{data_dup_id_region, missing_declared_type, undeclared_type, bad_resource, pass_with_fail, fail_without_fail, unknown_file, old_input_key, bad_context, unknown_yata_key}.rego (+ fixtures)   # ADR-0030 で、フィクスチャの data の形の誤り(変更前の input のキー、data.yata.context の誤り、data.yata の知らないキー)を追加
     ├── fixtures_missing/{no_dir, no_fail_fixture}.rego
     ├── orphan/gone.fixtures/
     ├── mismatch/wrong_expectation.rego (+ fixtures)
     └── timeout/slow.rego (+ fixtures)        # 入力があるときだけ遅くなるルール(下の注)。テストでは短い policy_timeout を渡す
 ```
 
-- 時間切れのケースのルール(`timeout/slow.rego` と、P2 の評価のテストで使う「終わらないルール」)は、入力の配列(フィクスチャの数百件の要素)を三重の `some ... in` で回すなど、入力があるときだけ遅くなる書き方にする。読み込み時の `fail` の確認は入力なしで評価するため、入力が無くても遅いルールは読み込みの `rego_error` になり、`fixture_timeout` / 評価の `error` のケースにならない。読み込み時の時間切れは `rego_error/slow_metadata.rego` で別に確かめる
+- 時間切れのケースのルール(`timeout/slow.rego` と、P2 の評価のテストで使う「終わらないルール」)は、`data` の配列(フィクスチャの数百件の要素)を三重の `some ... in` で回すなど、`data` があるときだけ遅くなる書き方にする。読み込み時の `fail` の確認は入力なしで評価するため、入力が無くても遅いルールは読み込みの `rego_error` になり、`fixture_timeout` / 評価の `error` のケースにならない。読み込み時の時間切れは `rego_error/slow_metadata.rego` で別に確かめる
+- `rule_contract/undefined_at_runtime.rego` は、`default` が無く、入力なしでは本体が成り立つ(`fail if not input.x` など)ため読み込みを通り、`pass_` のフィクスチャで `fail` が undefined になるルールにする
+- 評価時間の上限がリソースごとの評価の合計に掛かることは、P2 の評価のテストで、1 つのリソースの評価は上限より短いが、全リソースの合計は上限を超えるルールと入力で確かめる
 - 1 回の組み込み関数の呼び出しの途中では止まらないため、遅さは `numbers.range` などの 1 回の呼び出しではなく、文の繰り返しで作る
 - テストで渡す短い `policy_timeout` は 1 秒とし、遅いルールは上限が無ければ数十秒以上かかる量にする。`ok` などのほかのルールは数ミリ秒で終わる小ささにし、遅い CI でも上限との間に十分な差を取る
 
@@ -1003,8 +1073,8 @@ policies/
 | 段階 | テスト |
 | --- | --- |
 | P1 | `valid` が読み込め、ルールが ID の順に並ぶ。`.hidden` と `README.md` が無視される。`lib` のパッケージを使うルールが読める。`dir_failures` の各ケースで決めた `DirectoryFailureKind` になる。複数のディレクトリを指定し、1 つの失敗でほかのディレクトリの処理が続く。`rule_failures` で、読み込みの段階のルール単位の失敗がすべて集まり、`ok` のルールは読み込める。`LoadMode::Rules` でフィクスチャのディレクトリの中のシンボリックリンクが失敗にならず、`LoadMode::RulesWithFixtures` で `symlink` になる。上限・シンボリックリンク・junction の各ケース。`YataVersion::from_package_version` がプレリリースとビルドメタデータを除く。名前の規則と予約語、リソース種別の形式の単体テスト |
-| P2 | 偽の `Inventory`(ダミー値)で、状態の判定順の 6 つの場合(未収集、すべて失敗、評価のエラー、一部のリージョンの失敗、失敗の印、正常)と、`aws.account.account` が常に収集済みであること。`resource_region` がある要素は 1 つのリソースだけ、無い要素は同じ `id` のすべてのリソースを `fail` にする。`fail` の要素の各誤り(`resource_id` が無い、`message` が無い、`resource_region` が文字列でない(`null` を含む)、`path` が JSON Pointer でない、その `id` とリージョンのリソースが無い、その `id` のリソースが無い、`fail` が集合でない)で `error`。時間切れで `error`(短い上限と、終わらないルール)。`incomplete_resources` に `region` と `operation` が入り、昇順に並ぶ。`input` の配列が `(id, region)` の昇順に並び、宣言した種別だけが入る。`print` の出力が標準出力に出ない |
-| P3 | `valid` で `run_tests` が合格する(`expected.fail` の文字列とオブジェクトの両方、`resource_region` の有無)。`rule_failures` で、フィクスチャに関するすべての失敗の種類(`non_dummy_account_id` は上の一時ディレクトリのケースで)が、決めた `RuleFailureKind` と `details` で報告され、`ok` のルールは合格する。読み込みに失敗したルールのフィクスチャが `not_run` になる。`TestReport` の JSON(`Serialize`)の形 |
+| P2 | 偽の `Inventory`(ダミー値)で、状態の判定順の 6 つの場合(未収集、すべて失敗、評価のエラー、一部のリージョンの失敗、失敗の印、正常)と、`aws.account.account` が常に収集済みであること。(ADR-0030 で変更)`target_type` のリソースごとに 1 件の結果ができ、`(id, region)` の昇順に並ぶ。`input` が評価の対象のリソースで、`data` に宣言した種別だけが `(id, region)` の昇順で入り、`data.yata.context` に `account` と `regions` が入る。同じ `id` の複数のリージョンのリソースが別々に評価される。`message` が無いときに `title` が使われ、`reason` の `path` / `actual` / `expected`(`null` を含む)が結果に写る。ルールの規約の各誤り(`fail` が undefined・真偽値でない、`message` が文字列でない・空、`reason` がオブジェクトでない、`path` が JSON Pointer でない・`null`、`fail` と `message` の conflict)で `error` になり、説明にリソースの `id` とリージョンが入り、値が入らない。`fail` が `false` のリソースでは `message` / `reason` が評価されない(`message` に誤りのあるルールでも `pass` のリソースだけなら `error` にならない)。時間切れで `error`(短い上限と終わらないルール、および 1 つずつは短いが合計で上限を超えるルール)。`target_type` のリソースが 0 件なら評価しない。`incomplete_resources` に `region` と `operation` が入り、昇順に並ぶ。`print` の出力が標準出力に出ない |
+| P3 | `valid` で `run_tests` が合格する(`expected.fail` の文字列とオブジェクトの両方、一部のリージョンのコピーだけを `fail` にするルール)。`rule_failures` で、フィクスチャに関するすべての失敗の種類(`non_dummy_account_id` は上の一時ディレクトリのケースで)が、決めた `RuleFailureKind` と `details` で報告され、`ok` のルールは合格する。読み込みに失敗したルールのフィクスチャが `not_run` になる。`TestReport` の JSON(`Serialize`)の形 |
 | P4 | `assert_cmd` で `yata rules test`: 正しいセットで 0、ルール単位の失敗で 1、ディレクトリ全体の失敗・指定なし・`--format` の誤り・`--policy-timeout 0` で 2 と標準出力が空であること。対応していない種別(`aws.example.unsupported`)のルールで 1 と `unsupported_resource_type`。`--format json` の出力を `crates/yata-cli/tests/golden/` の期待するファイルと比べる(更新は `YATA_UPDATE_GOLDEN=1` のときだけ)。text の出力に制御文字がエスケープされて出る。`--policy-dir` と `YATA_POLICY_DIR` の優先度。子プロセスの環境変数は全体設計の「実 AWS に接続しないための対策」のとおりに設定する。中断を待つ関数の単体テスト(上の「終了コード」の中断) |
 
 ### CLI の統合テスト用のセット(`crates/yata-cli/tests/fixtures/policies/`)
@@ -1038,6 +1108,17 @@ P1 の実装で確かめた結果です(regorus 0.12.0)。
 - `rvm` を外した構成: `add_policy` / `eval_rule` / `eval_query` が使え、ビルドも通る。機能は足していない
 - 時間の上限の効き方: 内包表記、`every`、三重の `some ... in`、`walk` を含むルールが、いずれも上限で止まる
 
+リソースごとの評価(ADR-0030)の実装の最初に確かめることです。結果が違えば設計書を直してから進めます。
+
+| 項目 | 確かめること | 違った場合 |
+| --- | --- | --- |
+| `data.yata` とルールのパッケージ | `add_data` で `{"yata": {"context": ...}}` を入れたエンジンで、パッケージ `yata.rules.<ID>` のルールと `yata.lib.<name>` のライブラリが評価でき、ルールから `data.yata.context.regions` を参照できるか。`eval_rule("data.yata.rules.<ID>.fail")` が `data` の `yata` の下の基本の文書と衝突しないか | `data.yata.context` の代わりに、プロバイダ名と重ならない最上位の名前(例: `data.yata_context`)にする。全体設計と ADR-0030 を直す |
+| `set_input` の後の再評価 | 準備済みのエンジンで `set_input` だけを替えて `eval_rule` を繰り返したとき、前のリソースの規則の値が残らないか(`clean_internal_evaluation_state` で消えるはずのもの)。`with_document` の `input` も替わるか | 評価ごとにエンジンを `clone()` する(準備済みのエンジンの `clone()` は再準備を起こさない) |
+| `default` と `eval_rule` | `default fail := false` だけが成り立つとき、`eval_rule` が `false` を返すか。ルールに `message` が無いときの `eval_rule` が `not a valid rule path` のエラーになるか | エラーの種類で「定義が無い」を見分ける方法を変える |
+| conflict のエラー | `message` の 2 つの本体が別の値で成り立つとき、`eval_rule` がエラー(`rules should not produce multiple outputs` など)を返し、時間切れと見分けられるか | エラーのメッセージで見分ける |
+| タイマーの設定し直し | `eval_rule` の前に `set_execution_timer_config` で `limit` を変えたとき、その値で打ち切られ、再準備が起きないか | 残りの時間で打ち切れない場合は、リソースごとの評価の前後で経過時間を測り、合計が上限を超えた時点で `Timeout` にする(1 回の `eval_rule` の上限は `--policy-timeout` のまま) |
+| 性能 | 1 万件の `target_type` のリソースと単純なルールで、1 回の評価の固定の費用と、ルール × アカウントの評価の時間を測る。すべてのリソースが合格の場合と、すべてが不合格の場合(`message` / `reason` の評価を含む)の両方を測る(上の「リソースごとの評価の性能」の見積もりと比べる) | 見積もりより大きく遅ければ、PR に測定の結果を書き、全体設計の未決事項「`data` だけに依存する計算の共有」と評価の並列化の検討を早める |
+
 ## 全体設計の変更
 
 この PR で、次のとおり `docs/architecture/` を更新します。
@@ -1059,6 +1140,8 @@ P1 の実装で確かめた結果です(regorus 0.12.0)。
 - regorus 0.12.0 の cargo feature: <https://docs.rs/crate/regorus/0.12.0/features>
 - regorus の `Engine`(`eval_rule`、`set_execution_timer_config`、`set_gather_prints`、`take_prints`、`set_strict_builtin_errors`、`set_policy_length_config`): <https://docs.rs/regorus/0.12.0/regorus/struct.Engine.html>
 - regorus の制限(`ExecutionTimerConfig`、`PolicyLengthConfig`、`LimitError`、メモリの上限の関数): <https://docs.rs/regorus/0.12.0/regorus/utils/limits/index.html>、<https://docs.rs/regorus/0.12.0/regorus/utils/limits/struct.ExecutionTimerConfig.html>、<https://docs.rs/regorus/0.12.0/regorus/utils/limits/struct.PolicyLengthConfig.html>、<https://docs.rs/regorus/0.12.0/regorus/utils/limits/enum.LimitError.html>
+- regorus 0.12.0 のソース(`set_input` と `add_data` の再準備の有無、`eval_rule` ごとの状態の初期化 `clean_internal_evaluation_state`、`set_execution_timer_config`、完全ルールの conflict のエラー): <https://docs.rs/crate/regorus/0.12.0/source/src/engine.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/interpreter.rs>
+- Rego の言語仕様(`default`、完全ルールの conflict、`else`): <https://www.openpolicyagent.org/docs/policy-language>
 - regorus のソース(タイマーの適用と確認の場所、メモリの上限、組み込み関数の登録): <https://docs.rs/crate/regorus/0.12.0/source/src/engine.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/interpreter.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/utils/limits/time.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/utils/limits/memory.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/lib.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/builtins/mod.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/builtins/http.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/builtins/opa.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/builtins/net.rs>、<https://docs.rs/crate/regorus/0.12.0/source/src/builtins/time.rs>
 - OPA の CLI(`opa eval` / `opa test` の `--timeout`、`--ignore`): <https://www.openpolicyagent.org/docs/cli>
 - OPA の設定(バンドルの `size_limit_bytes`): <https://www.openpolicyagent.org/docs/configuration>
@@ -1075,7 +1158,7 @@ P1 の実装で確かめた結果です(regorus 0.12.0)。
 
 | 項目 | 内容 | 決める時期 |
 | --- | --- | --- |
-| `time.now_ns` とフィクスチャ | 認証情報の最終使用からの日数など、現在の時刻を使うルールは、フィクスチャの結果が実行する日によって変わる。選択肢: (1) フィクスチャの日時を、判定の境界から十分離れた過去・未来の値にする(形式の変更なし)、(2) フィクスチャに現在の時刻を指定するキー(例: `now`)を足し、regorus の拡張関数で `time.now_ns` の代わりの関数を用意する(フィクスチャの形式とルールの書き方の変更)、(3) エンジンが `input` に評価の時刻を入れる(`input` の形の変更)。推奨は (1) で始め、境界のテストが必要になったら (3) を検討する。regorus が `with time.now_ns as ...` に対応しているかも確かめる | 時刻を使うルール(IAM の 2.11〜2.13 など)を作るポリシーのリポジトリの Issue の前 |
+| `time.now_ns` とフィクスチャ | 認証情報の最終使用からの日数など、現在の時刻を使うルールは、フィクスチャの結果が実行する日によって変わる。選択肢: (1) フィクスチャの日時を、判定の境界から十分離れた過去・未来の値にする(形式の変更なし)、(2) フィクスチャに現在の時刻を指定するキー(例: `now`)を足し、regorus の拡張関数で `time.now_ns` の代わりの関数を用意する(フィクスチャの形式とルールの書き方の変更)、(3) エンジンが `data.yata.context` に評価の時刻を入れる(`data` の形の変更。ADR-0030 の前は `input` に入れる案だった)。推奨は (1) で始め、境界のテストが必要になったら (3) を検討する。regorus が `with time.now_ns as ...` に対応しているかも確かめる | 時刻を使うルール(IAM の 2.11〜2.13 など)を作るポリシーのリポジトリの Issue の前 |
 | ルールのテストのカバレッジ | regorus の `coverage` の機能で、フィクスチャが通らなかったルールの行を報告するか | 需要が出た時点で別 Issue |
 | 出力への注入のエスケープの共通化 | `yata rules test` の text の形式のエスケープ(`yata-cli/src/sanitize.rs`)を、`scan` の table の形式とログと共通にするか、置き場所をどこにするか | レポートの出力を実装する Issue |
 | 資源の上限のオプション | ファイルの大きさ・ファイル数・ディレクトリ数・深さを、オプション・環境変数で変えられるようにするか。この設計では変えられない | 上限に当たる実際のポリシーのリポジトリが現れた時点 |

@@ -151,13 +151,19 @@ classDiagram
         results
         findings_by_severity
     }
+    class RegoData {
+        <<JSON>>
+        yata : context with account and regions
+        provider : nested by service, then resource
+        leaf : array of Resource, only for target_type and related_types
+    }
     class RegoInput {
         <<JSON>>
-        account : AccountInfo
-        regions
-        aws : nested service then resource, such as input.aws.s3.bucket
+        one Resource of target_type
+        set per resource with set_input
     }
-    note for RegoInput "Not a Rust type. Built by yata-engine per rule and per account. Holds only target_type and related_types, with resources of all regions merged per type."
+    note for RegoData "Not a Rust type. Built by yata-engine once per rule and account and added with add_data. Read as data.yata.context and data.aws.s3.bucket. Resources of all regions are merged per type."
+    note for RegoInput "Not a Rust type. The evaluated resource, read as input.id, input.region, input.configuration. Same shape as Resource."
     note for Resource "A failure marker is a value in configuration: {yata_error: {kind, message}} under the failed per-resource operation key. It does not change the state of the group, which stays collected. Such a resource makes the rule incomplete."
 
     Inventory "1" *-- "1..*" AccountInfo : accounts
@@ -166,8 +172,10 @@ classDiagram
     Inventory "1" *-- "0..*" CollectionError : collection_errors
     ResourceSet "1" *-- "0..*" Resource : resources
     CollectError ..> CollectionError : converted by yata-provider-aws
-    Inventory ..> RegoInput : yata-engine builds per rule and account (collection_errors excluded)
-    RuleMetadata ..> RegoInput : target_type and related_types select the types
+    Inventory ..> RegoData : yata-engine builds per rule and account (collection_errors excluded)
+    RuleMetadata ..> RegoData : target_type and related_types select the types
+    RegoData ..> RegoInput : one element of the target_type array per evaluation
+    Resource ..> RegoInput : copied as input
     RuleOutcome *-- RuleMetadata
     RuleOutcome o-- RuleResult
     RuleOutcome o-- IncompleteResource

@@ -44,7 +44,7 @@ yata-cli/
 | `yata-cli` | bin(`yata`) | 引数の解析(オプション > 環境変数 > 既定値)、ポリシーのディレクトリの決定(`--policy-dir` / `YATA_POLICY_DIR`)、ルールとプロバイダの対応の検査、スキャン処理の組み立て(収集 → 評価 → 出力)、スナップショットの書き込み、ログの初期化、終了コード | すべての `yata-*`、clap、tokio、tracing-subscriber、tempfile |
 | `yata-core` | lib | 共通の型: `Resource`、`ResourceSet`、`Inventory`、`AccountInfo`、`ResourceTypeInfo`、`CollectionError`(収集の失敗の記録)、`RuleMetadata`、`Severity`、`RuleOutcome`(ルール × アカウント単位の評価結果)、`RuleStatus`、`SkipReason`、`RuleResult`(リソース単位の `pass` / `fail`)、`ResultStatus`、`ScanReport` など。シリアライズ形式(JSON)の定義と、スナップショットの読み込み・検証もここ | serde、serde_json、thiserror |
 | `yata-provider-aws` | lib | AWS の認証情報・リージョンの解決、コレクターの定義と実行、読み取り専用ガード、必要な IAM 権限の一覧 | `yata-core`、aws-config、aws-sdk-*、tokio、tracing |
-| `yata-engine` | lib | ポリシーのディレクトリの走査とファイルの読み込み、マニフェストの検証、ライブラリと Rego ルールの読み込み・メタデータ検証、`input` の組み立てと評価、フィクスチャによるルールのテスト機能(静的検査を含む) | `yata-core`、regorus、serde、serde_json、thiserror、tracing |
+| `yata-engine` | lib | ポリシーのディレクトリの走査とファイルの読み込み、マニフェストの検証、ライブラリと Rego ルールの読み込み・メタデータ検証、`input` / `data` の組み立てとリソースごとの評価、フィクスチャによるルールのテスト機能(静的検査を含む) | `yata-core`、regorus、serde、serde_json、thiserror、tracing |
 | `yata-report` | lib | `ScanReport` を table / JSON / SARIF に整形して `Write` に書く | `yata-core`、serde_json、comfy-table |
 
 ### 依存の向き

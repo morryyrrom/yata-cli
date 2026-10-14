@@ -60,13 +60,16 @@
 ### リソース種別
 
 - 形式: `<provider>.<service>.<resource>` の 3 階層に固定する(例: `aws.s3.bucket`、`aws.iam.user`、`aws.ec2.security_group`)
-- 各部分は `[a-z][a-z0-9_]*`(英小文字で始まる)とし、Rego の予約語(`as`、`contains`、`default`、`else`、`every`、`false`、`if`、`import`、`in`、`not`、`null`、`package`、`some`、`true`、`with`)を使わない。`input.aws.<service>.<resource>` をドット区切りの形で必ず書けるようにするため([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「名前の規則」と同じ規則)
+- 各部分は `[a-z][a-z0-9_]*`(英小文字で始まる)とし、Rego の予約語(`as`、`contains`、`default`、`else`、`every`、`false`、`if`、`import`、`in`、`not`、`null`、`package`、`some`、`true`、`with`)を使わない。`data.aws.<service>.<resource>` をドット区切りの形で必ず書けるようにするため([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「名前の規則」と同じ規則)
   - ルールのメタデータで規則に合わない種別を書いた場合は、メタデータの誤り(ルール単位の失敗。`rules test` で 1、それ以外のコマンドで 2)
   - このリポジトリのコレクターが作る種別は、`yata-provider-aws` のテストで規則に合うことを確かめる
-- 3 階層に固定するので、ある種別名が別の種別名の前の部分になることは無い(`aws.s3.bucket` と `aws.s3.bucket.policy` は作れない)。これにより、Rego で `input.aws.s3.bucket` のように入れ子でたどれる(下の「ポリシーエンジンへの渡し方」)
+- 3 階層に固定するので、ある種別名が別の種別名の前の部分になることは無い(`aws.s3.bucket` と `aws.s3.bucket.policy` は作れない)。これにより、Rego で `data.aws.s3.bucket` のように入れ子でたどれる(下の「ポリシーエンジンへの渡し方」)
 - `<service>` は AWS SDK のサービス名(`aws-sdk-<service>` の `<service>`)に合わせる
 - 1 つのリソース種別は 1 つのコレクターだけが作る
 - アカウント単位・リージョン単位の設定(例: パスワードポリシー、EBS のデフォルト暗号化)も 1 件のリソースとして表す(例: `aws.iam.password_policy`、`aws.ec2.ebs_encryption_default`)。設定が存在しない場合も、存在しないことを構成情報で表したリソースを 1 件作り、ルールが「未設定」を判定できるようにする
+  - リージョンごとの設定・有効かどうか(サービスの有効化、既定の設定など)は、存在しない場合も含め、対象リージョンごとに 1 件のリソースとして収集する(例: `aws.ec2.ebs_encryption_default`。IAM Access Analyzer のアナライザーの一覧なら、アナライザーが無いリージョンでも、空の一覧を持つ 1 件を作る)。これで、リージョンごとの判定もリソースごとの評価で書け、結果がリージョンごとに出る([ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md))
+  - これは上の「コレクターの方針」と矛盾しない。コレクターは API の結果を絞り込まず・置き換えずにそのまま入れ、結果が空でもそのリージョンのリソースを 1 件作るだけで、有効か・設定されているかの判定はルールで行う
+  - 実際の収集の形(種別名、`id`、どの操作の結果を入れるか)は、そのコレクターの機能設計書で決める
 - 特別な種別 `aws.account.account`(下の「アカウントのリソース」)
 
 ## Resource の項目
@@ -90,10 +93,10 @@
 - リソースの `region` と `id` の組も、アカウント × 種別の中で一意になる。これは次の 2 つの前提による
   - `regional` の種別では、リソースの `region` は、そのリソースを入れた `ResourceSet` の `region` と同じ
   - 1 つの種別は、`global` の `ResourceSet` か、リージョンごとの `ResourceSet` の、どちらか一方だけを持つ(スコープは種別ごとに 1 つ)
-- 外から読み込む入力でも、この一意性を確かめる。スナップショットでは `ResourceSet` の中の `id` の重複を検証の誤りにし(下の「読み込みと検証」)、フィクスチャでは `input` の同じ種別の中の `id` と `region` の組の重複を形式の誤りにする([ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md))
+- 外から読み込む入力でも、この一意性を確かめる。スナップショットでは `ResourceSet` の中の `id` の重複を検証の誤りにし(下の「読み込みと検証」)、フィクスチャではフィクスチャの `data` の同じ種別の中の `id` と `region` の組の重複を形式の誤りにする([ADR: ポリシーとフィクスチャの形式・配置・自動検出](../adr/ADR-0001-Policy-and-Fixture-Layout.ja.md))
 - AWS が同じリソースを複数のリージョンに見せる場合に限り、同じ `id` が複数のリージョンの `ResourceSet` に現れてよい。例: CloudTrail のマルチリージョンの証跡は、ホームリージョンの証跡とほかのリージョンの shadow trail が同じ ARN で返るため、どれも `TrailARN` を `id` にする
   - コピーごとに別の `id`(リージョンを加えた形など)を作らない。ARN があるのに ARN を使わない例外になり、コレクターが shadow trail かを見分けて `id` を変えることになるため。AWS 自身も、どのリージョンのコピーにも同じ ARN を使う
-- このため、ルールの `input` の配列には、同じ `id` で `region` だけが違うリソースが並びうる(下の「ポリシーエンジンへの渡し方」)。ルールの検出とフィクスチャの期待値は、必要に応じてリージョンも指定して 1 つのリソースを指せる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)
+- このため、ルールの `data` の配列には、同じ `id` で `region` だけが違うリソースが並びうる(下の「ポリシーエンジンへの渡し方」)。ルールはリソースごとに評価されるため、それぞれが別の結果になり、ルールは `input.region` でどのリージョンのものかが分かる。フィクスチャの期待値は、必要に応じてリージョンも指定して 1 つのリソースを指せる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「期待値の比べ方」)
 
 ### ARN を形式から作るリソースの id
 
@@ -200,7 +203,7 @@ AWS が ARN を定義していない種別にだけ使います。
   - `message` は英語で、認証情報を含めない
 - 失敗の印は操作のキーの値の最上位に置く。AWS のどの操作の出力にも、最上位の項目 `yata_error` は無いため、出力と取り違えない(項目名には camelCase のものや、認証情報レポートの snake_case の列名も入るため、名前の書き方の違いには頼らない)
 - Rego からは `object.get(r.configuration, ["GetBucketPolicy", "yata_error"], null) != null` で見分けられる
-- 印の下の項目(例: `GetBucketPolicy.Policy`)は undefined になるため、それを参照するルールの本体は成り立たず、そのリソースは `fail` に入らない。このため、`yata-engine` は失敗の印を持つリソースがあればルールの状態を `incomplete` にし、そのリソースを `RuleOutcome.incomplete_resources` に記録する。黙って `pass` だけを出さない([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「状態の判定順」)
+- 印の下の項目(例: `GetBucketPolicy.Policy`)は undefined になるため、それを参照するルールの本体は成り立たず、そのリソースは `pass` になりうる。このため、`yata-engine` は失敗の印を持つリソースがあればルールの状態を `incomplete` にし、そのリソースを `RuleOutcome.incomplete_resources` に記録する。黙って `pass` だけを出さない([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「状態の判定順」)
 - 失敗の印はスナップショットにもそのまま保存する
 
 ### 項目名と値の規則
@@ -238,10 +241,10 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 
 - 秘密に当たる値の取得そのものを目的とする API は呼ばない(読み取り専用ガードの拒否リスト。[AWS アクセス](Architecture-AWS-Access.ja.md))
 - それ以外の API の応答に含まれる値は、伏せずにそのまま入れる(`"<redacted>"` などへの置き換えはしない)。コレクターは情報を集めるだけで、どの値を秘密として扱うかの判断を収集に持ち込まないため(上の「コレクターの方針」)
-- 応答に含まれる値は、スナップショット、Rego の `input`、ルールが `actual` に入れた場合はレポートに、そのまま入る
+- 応答に含まれる値は、スナップショット、Rego の `input` / `data`、ルールが `reason` の `actual` に入れた場合はレポートに、そのまま入る
   - スナップショット: 外部に出さない。`yata collect` は書き込みの後に注意を出す(下の「書き込み(`yata collect`)」)
   - レポート: 外部に出すときは `--omit-values` で `actual` / `expected` を省く([出力形式](Architecture-Output-Formats.ja.md) の「値の扱い」)
-- ルールの作者は、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「fail の規約」)
+- ルールの作者は、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「ルールの規約」)
 
 ### 構成情報の互換性
 
@@ -252,7 +255,7 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 - 互換性の無い変更が必要な場合は、**新しいリソース種別名を作る**ことを原則とする(例: `aws.example.widget` を残したまま `aws.example.widget_v2` を足す)
   - 古い種別のコレクターは、移行の期間が終わるまで残し、ルールが新しい種別に移れるようにする
   - 影響がその種別を使うルールだけに限られるため。ポリシーの形式のバージョン(`format_version`)を上げると、すべてのポリシーのセットが新しい `yata` を必要とし、影響が大きい
-- `format_version` を上げるのは、`input` 全体の形やリソースの共通の項目(`id`、`type`、`account`、`region` など)を変えるときだけとする([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「互換性の規則」)
+- `format_version` を上げるのは、`input` / `data` 全体の形やリソースの共通の項目(`id`、`type`、`account`、`region` など)を変えるときだけとする([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「互換性の規則」)
 - **SDK の更新時**: 項目名は API の名前なので、Rust の SDK の名前が変わっても出力は変わらない。SDK を更新する PR では、コレクターの出力を期待するファイルと比べるテストを実行し、差分が項目の追加以外を含む場合(API の項目の削除・型の変更など)は、互換性の無い変更として新しい種別名で対応する
 
 ## ResourceSet と Inventory
@@ -354,7 +357,7 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 
 - 型(`Inventory.accounts`、`ResourceSet.account`、`CollectionError.account`、アカウントキー)とスナップショットの構成は、複数のアカウントを持てる形にしておく
 - 当面、`scan` と `collect` が収集するのは、認証情報で決まる 1 つのアカウントだけとする。複数のアカウントを含むスナップショットを `--snapshot` で読んだ場合は、未対応として終了コード 2 にする
-- 複数のアカウントへの対応(AWS Organizations など)は未決事項とする。対応するときは、`input` をアカウントごとに作り、ルールの評価もアカウントごとに行う(下の「ポリシーエンジンへの渡し方」がアカウント単位なので、形を変えずに済む)
+- 複数のアカウントへの対応(AWS Organizations など)は未決事項とする。対応するときは、`data` をアカウントごとに作り、ルールの評価もアカウントごとに行う(下の「ポリシーエンジンへの渡し方」がアカウント単位なので、形を変えずに済む)
 
 ## スナップショット
 
@@ -445,12 +448,18 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 
 図: [リソースモデルの関係図](../diagrams/Diagram-0001-Resource-Model.md)
 
-`yata-cli` が `Inventory` を `yata-engine` に渡し、`yata-engine` が **ルール × アカウント** ごとに Rego の `input` を作ります。
+`yata-cli` が `Inventory` を `yata-engine` に渡します。`yata-engine` は **ルール × アカウント** ごとに Rego の `data` を作り、`target_type` のリソースごとに、そのリソースを Rego の `input` にしてルールを評価します([ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md))。
+
+`data`(ルール × アカウントごとに 1 回入れる)の例です。
 
 ```json
 {
-  "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
-  "regions": ["us-east-1", "ap-northeast-1"],
+  "yata": {
+    "context": {
+      "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
+      "regions": ["us-east-1", "ap-northeast-1"]
+    }
+  },
   "aws": {
     "s3": {
       "bucket": [
@@ -464,16 +473,49 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 }
 ```
 
-- リソース種別 `<provider>.<service>.<resource>` を入れ子にして置く。ルールは `input.aws.s3.bucket` のように参照する
+`input`(リソースごとに差し替える)の例です。`target_type` が `aws.s3.bucket` のルールでは、`data.aws.s3.bucket` の要素の 1 つがそのまま入ります。
+
+```json
+{
+  "id": "arn:aws:s3:::example-bucket",
+  "type": "aws.s3.bucket",
+  "account": "aws-123456789012",
+  "region": "us-east-1",
+  "name": "example-bucket",
+  "tags": {},
+  "configuration": { "...": "..." }
+}
+```
+
+**`input`**
+
+- 評価の対象の 1 つのリソース(`Resource` の JSON。上の「Resource の項目」)。ルールは `input.id`、`input.region`、`input.configuration...` のように参照する
+- `target_type` のリソースを `(id, region)` の昇順に 1 つずつ入れる
+
+**`data.<provider>.<service>.<resource>`**
+
+- リソース種別 `<provider>.<service>.<resource>` を入れ子にして置く。ルールは `data.aws.s3.bucket` のように参照する
 - 1 つのアカウントの、全リージョンの `ResourceSet` の `resources` を、種別ごとに 1 つの配列にまとめて入れる。CIS の「全リージョンで CloudTrail が有効か」のように、リージョンをまたぐ判定ができるようにするため。各リソースは `region` を持つ
 - まとめた配列は、`id` → `region` の昇順に並べる。評価とフィクスチャとの比較を再現できるようにするため
 - 配列には、同じ `id` で `region` だけが違うリソースが並びうる(上の「id の一意性」。CloudTrail の shadow trail など)。ルールは、リソースを `id` だけでなく `id` と `region` の組で区別する必要があるかを、種別ごとに確かめる
-- `regions` には対象にしたリージョンを入れる。リージョンごとの有無を判定するルールが使う
-- 入れるのは、そのルールのメタデータの `target_type` と `related_types` の種別だけ。ルールが使うデータが明示され、フィクスチャも小さくなる
-- 宣言した種別で、収集済みの組が 0 件だった場合は空の配列を入れる。評価されたルールの `input` では、宣言した種別の配列は必ず存在する
+- 入れるのは、そのルールのメタデータの `target_type` と `related_types` の種別だけ。`target_type` の種別も入れる(評価の対象のリソースも含む。同じ種別のほかのリソースと比べるルールのため)。ルールが使うデータが明示され、フィクスチャも小さくなる
+- 宣言した種別で、収集済みの組が 0 件だった場合は空の配列を入れる。評価されたルールの `data` では、宣言した種別の配列は必ず存在する
 - 宣言した種別に、未収集・失敗の組がある場合の扱いはルールの状態で決める([ポリシー評価](Architecture-Policy-Evaluation.ja.md))。黙って空の配列を補って `pass` にすることはしない
-- `collection_errors` は `input` に入れず、`yata-engine` がルールの状態を決めるのに使う
-- `data` ドキュメントは使わない。ルールに渡すのは `input` だけとする
+
+**`data.yata.context`**
+
+- `account` には、そのアカウントの `AccountInfo` を入れる
+- `regions` には対象にしたリージョンを入れる。リージョンごとの有無を判定するルールが使う
+
+**名前の衝突**
+
+- ポリシーのパッケージは `yata.rules.<ルール ID>` と `yata.lib.<name>...` に限られる([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「パッケージ名」「ライブラリ」)。ルールの値は `data.yata.rules...`、ライブラリの値は `data.yata.lib...` に現れる
+- エンジンが入れる `data.<provider>`(プロバイダの名前に `yata` は使わない)と `data.yata.context` は、これらと重ならないため、ポリシーの規則と名前が衝突しない。`data.yata` の下で、`rules` と `lib` 以外の名前はエンジンのために取っておく
+
+**そのほか**
+
+- `collection_errors` は `data` に入れず、`yata-engine` がルールの状態を決めるのに使う
+- ルールのフィクスチャは、キー `data` の下に、この `data` と同じ形の値を置く。`yata-engine` はそれをそのまま Rego の `data` に入れ、`target_type` の配列のリソースを 1 件ずつ `input` にして評価する([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「フィクスチャの評価」)
 
 ## 実装上の配置
 
