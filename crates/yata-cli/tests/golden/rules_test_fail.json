@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "tool": {
+    "name": "yata",
+    "version": "@VERSION@"
+  },
+  "result": "failed",
+  "summary": {
+    "rules": {
+      "total": 2,
+      "passed": 0,
+      "failed": 2
+    },
+    "fixtures": {
+      "total": 4,
+      "passed": 2,
+      "failed": 2,
+      "not_run": 0
+    },
+    "failures": 2
+  },
+  "policies": [
+    {
+      "name": "cli_fail_policies",
+      "version": "1.2.3",
+      "format_version": 1
+    }
+  ],
+  "rules": [
+    {
+      "id": "cli_fail_policies.control_message",
+      "policy_set": "cli_fail_policies",
+      "path": "control_message.rego",
+      "target_type": "aws.account.account",
+      "related_types": [],
+      "status": "failed",
+      "fixtures": [
+        {
+          "file": "fail_always.json",
+          "status": "passed"
+        },
+        {
+          "file": "pass_wrong.json",
+          "status": "failed"
+        }
+      ]
+    },
+    {
+      "id": "cli_fail_policies.expected_mismatch",
+      "policy_set": "cli_fail_policies",
+      "path": "expected_mismatch.rego",
+      "target_type": "aws.account.account",
+      "related_types": [],
+      "status": "failed",
+      "fixtures": [
+        {
+          "file": "fail_not_flagged.json",
+          "status": "failed"
+        },
+        {
+          "file": "pass_unflagged.json",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "failures": [
+    {
+      "kind": "fixture_mismatch",
+      "policy_set": "cli_fail_policies",
+      "rule_id": "cli_fail_policies.control_message",
+      "path": "control_message.fixtures/pass_wrong.json",
+      "message": "fixture result does not match expected.fail",
+      "details": {
+        "missing": [],
+        "unexpected": [
+          {
+            "id": "aws-123456789012",
+            "region": "global",
+            "messages": [
+              "red \u001b[31mtext\u001b[0m\nsecond line"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "kind": "fixture_mismatch",
+      "policy_set": "cli_fail_policies",
+      "rule_id": "cli_fail_policies.expected_mismatch",
+      "path": "expected_mismatch.fixtures/fail_not_flagged.json",
+      "message": "fixture result does not match expected.fail",
+      "details": {
+        "missing": [
+          {
+            "id": "aws-123456789012",
+            "region": "global"
+          }
+        ],
+        "unexpected": []
+      }
+    }
+  ]
+}

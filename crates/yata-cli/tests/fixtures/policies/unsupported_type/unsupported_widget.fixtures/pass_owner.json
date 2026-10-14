@@ -1,0 +1,22 @@
+{
+  "description": "Widget with owner",
+  "input": {
+    "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
+    "regions": ["us-east-1"],
+    "aws": {
+      "example": {
+        "unsupported": [
+          {
+            "id": "widget-1",
+            "type": "aws.example.unsupported",
+            "account": "aws-123456789012",
+            "region": "us-east-1",
+            "tags": { "owner": "team" },
+            "configuration": {}
+          }
+        ]
+      }
+    }
+  },
+  "expected": { "fail": [] }
+}
