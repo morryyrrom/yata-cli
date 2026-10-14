@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::Serialize;
+use yata_core::RuleErrorKind;
 
 /// Policy loading failed with at least one directory-level failure (exit code 2).
 ///
@@ -135,7 +136,7 @@ kind_enum! {
         PackageMismatch => "package_mismatch",
         /// The metadata is invalid.
         MetadataInvalid => "metadata_invalid",
-        /// `fail` is missing or is not a set.
+        /// `fail` is missing, undefined without input, or is not a boolean.
         FailMissing => "fail_missing",
         /// The provider does not support a declared resource type.
         UnsupportedResourceType => "unsupported_resource_type",
@@ -172,8 +173,8 @@ pub struct UnexpectedResource {
     pub id: String,
     /// Region of the resource.
     pub region: String,
-    /// Messages of the findings for this resource.
-    pub messages: Vec<String>,
+    /// The `message` of the result for this resource.
+    pub message: String,
 }
 
 /// Kind-specific details of a [`RuleFailure`].
@@ -206,55 +207,160 @@ pub enum FailureDetails {
 }
 
 /// Error while evaluating one rule (rule status `error`).
+///
+/// Evaluation stops at the first error of a rule and account. The descriptions made by this
+/// crate name the resource (`id` and region) and a type or a rule, never a value returned by the
+/// rule. The message of the Rego engine is kept apart in [`EvaluationError::Engine`], because it
+/// can contain values; [`EvaluationError::summary`] leaves it out.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum EvaluationError {
     /// The evaluation exceeded the time limit.
-    #[error("evaluation timed out after {} s", .limit.as_secs_f64())]
+    #[error("{}", self.summary())]
     Timeout {
         /// The limit that was exceeded.
         limit: Duration,
+        /// The resource being evaluated when the limit was hit, if any.
+        resource: Option<ResourceKey>,
     },
-    /// The Rego engine reported an error.
-    #[error("rego engine error: {message}")]
+    /// The Rego engine reported an error (a conflict, for example).
+    #[error("{}: {message}", self.summary())]
     Engine {
-        /// Message of the engine.
+        /// Message of the engine. It can contain values from the rule.
         message: String,
+        /// The resource being evaluated, if the error belongs to one.
+        resource: Option<ResourceKey>,
     },
-    /// `fail` is undefined or not a set.
-    #[error("`fail` is not a set")]
-    FailNotSet,
-    /// An element of `fail` is malformed.
-    #[error("`fail` element {index} is invalid: {reason}")]
-    InvalidFailElement {
-        /// Position of the element.
-        index: usize,
-        /// Why it is invalid.
+    /// `fail` is undefined for a resource.
+    #[error("{}", self.summary())]
+    FailUndefined {
+        /// The resource being evaluated.
+        resource: ResourceKey,
+    },
+    /// `fail` is not a boolean.
+    #[error("{}", self.summary())]
+    FailNotBoolean {
+        /// Name of the type that `fail` has.
+        found: &'static str,
+        /// The resource being evaluated.
+        resource: ResourceKey,
+    },
+    /// `message` is not a non-empty string.
+    #[error("{}", self.summary())]
+    InvalidMessage {
+        /// What is wrong, with the name of a type but no value.
         reason: String,
+        /// The resource being evaluated.
+        resource: ResourceKey,
     },
-    /// An element of `fail` refers to a resource that is not in the input.
-    #[error("`fail` refers to an unknown resource {resource_id:?}{}", region_suffix(.region))]
-    UnknownResource {
-        /// The `resource_id` of the element.
-        resource_id: String,
-        /// The `resource_region` of the element, if given.
-        region: Option<String>,
+    /// `reason` is not an object, or `reason.path` is not a JSON Pointer string.
+    #[error("{}", self.summary())]
+    InvalidReason {
+        /// What is wrong, with the name of a type but no value.
+        reason: String,
+        /// The resource being evaluated.
+        resource: ResourceKey,
     },
-    /// Two resources of the target type share the same `id` and `region`.
-    #[error("duplicate resource {resource_id:?} in region {region:?}")]
+    /// Two resources of the target type share the same `id` and region.
+    #[error("{}", self.summary())]
     DuplicateResource {
         /// Resource ID.
         resource_id: String,
         /// Region.
         region: String,
     },
+    /// A resource of the target type has no string `id` or `region`.
+    #[error("{}", self.summary())]
+    InvalidResource {
+        /// Position of the resource in the array of the target type.
+        index: usize,
+    },
 }
 
-fn region_suffix(region: &Option<String>) -> String {
-    region
-        .as_ref()
-        .map(|r| format!(" in region {r:?}"))
-        .unwrap_or_default()
+impl EvaluationError {
+    /// The kind of the error, safe to log at any level.
+    pub fn kind(&self) -> RuleErrorKind {
+        match self {
+            Self::Timeout { .. } => RuleErrorKind::Timeout,
+            Self::Engine { message, .. } if is_conflict(message) => RuleErrorKind::Conflict,
+            Self::Engine { .. } => RuleErrorKind::Engine,
+            Self::FailUndefined { .. }
+            | Self::FailNotBoolean { .. }
+            | Self::InvalidMessage { .. }
+            | Self::InvalidReason { .. } => RuleErrorKind::Type,
+            Self::DuplicateResource { .. } | Self::InvalidResource { .. } => {
+                RuleErrorKind::Internal
+            }
+        }
+    }
+
+    /// A one-line description without the message of the Rego engine.
+    ///
+    /// It contains the kind of the error and the `id` and region of the resource being
+    /// evaluated, but no value returned by the rule. `Display` is this description followed by
+    /// the message of the Rego engine, if there is one.
+    pub fn summary(&self) -> String {
+        let at =
+            |resource: &ResourceKey| format!(" (resource {} in {})", resource.id, resource.region);
+        let at_opt = |resource: &Option<ResourceKey>| resource.as_ref().map(at).unwrap_or_default();
+        match self {
+            Self::Timeout { limit, resource } => format!(
+                "evaluation timed out after {} s{}",
+                limit.as_secs_f64(),
+                at_opt(resource)
+            ),
+            Self::Engine { resource, .. } => {
+                let what = if self.kind() == RuleErrorKind::Conflict {
+                    "rule evaluation conflict"
+                } else {
+                    "rule evaluation error"
+                };
+                format!("{what}{}", at_opt(resource))
+            }
+            Self::FailUndefined { resource } => {
+                format!(
+                    "fail is undefined; add \"default fail := false\"{}",
+                    at(resource)
+                )
+            }
+            Self::FailNotBoolean { found, resource } => {
+                format!(
+                    "fail must be a boolean, but was {}{}",
+                    article(found),
+                    at(resource)
+                )
+            }
+            Self::InvalidMessage { reason, resource }
+            | Self::InvalidReason { reason, resource } => {
+                format!("{reason}{}", at(resource))
+            }
+            Self::DuplicateResource {
+                resource_id,
+                region,
+            } => format!("duplicate resource {resource_id} in {region}"),
+            Self::InvalidResource { index } => {
+                format!("resource {index} of the target type has no string id or region")
+            }
+        }
+    }
+}
+
+/// Whether a message of the Rego engine reports a conflict: a complete rule or a function that
+/// produced two different values.
+fn is_conflict(message: &str) -> bool {
+    // regorus words conflicts in several ways: `rules should not produce multiple outputs`,
+    // `function produced multiple outputs ...` and, for two definitions of a complete rule that
+    // give different values, `rule conflicts with the following rule`.
+    message.contains("multiple outputs") || message.contains("rule conflicts with")
+}
+
+/// A type name with its indefinite article, for example `a string` or `an array`.
+pub(crate) fn article(type_name: &str) -> String {
+    if type_name == "null" {
+        return type_name.to_owned();
+    }
+    let vowel = type_name.starts_with(['a', 'e', 'i', 'o', 'u']);
+    format!("{} {type_name}", if vowel { "an" } else { "a" })
 }
 
 #[cfg(test)]

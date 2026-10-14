@@ -5,26 +5,28 @@ import rego.v1
 metadata := {
 	"title": "Reports the shape of its input",
 	"severity": "info",
-	"description": "Fails every widget with details about the input in `actual`.",
+	"description": "Fails every widget with details about `input` and `data` in `actual`.",
 	"remediation": "None.",
 	"target_type": "aws.example.widget",
 	"related_types": ["aws.example.gadget"],
 	"references": [],
 }
 
-fail contains finding if {
-	some widget in input.aws.example.widget
-	finding := {
-		"resource_id": widget.id,
-		"resource_region": widget.region,
-		"message": "probe",
-		"actual": {
-			"account_id": input.account.id,
-			"regions": input.regions,
-			"example_keys": sort([k | some k, _ in input.aws.example]),
-			"top_keys": sort([k | some k, _ in input]),
-			"widget_order": [sprintf("%s@%s", [w.id, w.region]) | some w in input.aws.example.widget],
-			"gadget_count": count(input.aws.example.gadget),
-		},
-	}
-}
+# Every field is reported in `actual`, to check the shape of `input` and `data`.
+default fail := false
+
+fail if input.id
+
+message := "probe"
+
+reason := {"actual": {
+	"input_keys": sort([k | some k, _ in input]),
+	"input_id": input.id,
+	"account_id": data.yata.context.account.id,
+	"regions": data.yata.context.regions,
+	"context_keys": sort([k | some k, _ in data.yata.context]),
+	"example_keys": sort([k | some k, _ in data.aws.example]),
+	"service_keys": sort([k | some k, _ in data.aws]),
+	"widget_order": [sprintf("%s@%s", [w.id, w.region]) | some w in data.aws.example.widget],
+	"gadget_count": count(data.aws.example.gadget),
+}}

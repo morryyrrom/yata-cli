@@ -14,14 +14,17 @@ metadata := {
 	"tags": ["example"],
 }
 
-fail contains finding if {
-	some widget in input.aws.example.widget
-	not widget.tags.owner
-	not helpers.is_error_marker(object.get(widget.configuration, "Describe", null))
-	finding := {
-		"resource_id": widget.id,
-		"message": sprintf("Widget %s has no owner tag", [widget.id]),
-		"path": "/tags",
-		"actual": widget.tags,
-	}
+default fail := false
+
+fail if {
+	not input.tags.owner
+	not helpers.is_error_marker(object.get(input.configuration, "Describe", null))
+}
+
+message := sprintf("Widget %s has no owner tag", [input.id])
+
+reason := {
+	"path": "/tags",
+	"actual": input.tags,
+	"expected": {"owner": "any"},
 }

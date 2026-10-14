@@ -362,8 +362,7 @@ fn json_keeps_control_characters_escaped() {
     let messages: Vec<&str> = failures
         .iter()
         .flat_map(|f| f["details"]["unexpected"].as_array().into_iter().flatten())
-        .flat_map(|u| u["messages"].as_array().unwrap())
-        .map(|m| m.as_str().unwrap())
+        .map(|u| u["message"].as_str().unwrap())
         .collect();
     assert_eq!(messages, ["red \u{1b}[31mtext\u{1b}[0m\nsecond line"]);
 }

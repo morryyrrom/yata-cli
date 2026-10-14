@@ -7,7 +7,7 @@ use std::time::Duration;
 use yata_core::RuleMetadata;
 
 use crate::engine_config::{RegoEngine, RegoFailure, RegoValue};
-use crate::error::RuleFailureKind;
+use crate::error::{RuleFailureKind, article};
 use crate::files::{ReadError, read_text_limited};
 use crate::metadata;
 
@@ -135,13 +135,13 @@ pub(crate) fn load_rule(
     }
 
     let metadata_value = match engine.eval_rule(&format!("{package}.metadata")) {
-        Ok(RegoValue::Undefined) => {
+        Ok(RegoValue::NoRule | RegoValue::Undefined) => {
             return Err(failed(
                 RuleFailureKind::MetadataInvalid,
                 "metadata is not defined (it must not depend on input)",
             ));
         }
-        Ok(RegoValue::Set(_)) => {
+        Ok(RegoValue::Set(_) | RegoValue::Bool(_)) => {
             return Err(failed(
                 RuleFailureKind::MetadataInvalid,
                 "metadata must be an object",
@@ -153,13 +153,37 @@ pub(crate) fn load_rule(
     let metadata = metadata::validate(&metadata_value)
         .map_err(|m| failed(RuleFailureKind::MetadataInvalid, m))?;
 
+    // Without input, `fail` must be a boolean. This finds a missing `default fail := false` and
+    // the old partial set form. A `fail` that is undefined for some resources only at run time
+    // is an evaluation error instead.
     match engine.eval_rule(&format!("{package}.fail")) {
-        Ok(RegoValue::Set(_)) => {}
-        Ok(RegoValue::Undefined) => {
-            return Err(failed(RuleFailureKind::FailMissing, "fail is not defined"));
+        Ok(RegoValue::Bool(_)) => {}
+        Ok(RegoValue::NoRule) => {
+            return Err(failed(
+                RuleFailureKind::FailMissing,
+                "rule has no \"fail\"; add \"default fail := false\" and \"fail if { ... }\"",
+            ));
         }
-        Ok(RegoValue::Json(_)) => {
-            return Err(failed(RuleFailureKind::FailMissing, "fail must be a set"));
+        Ok(RegoValue::Undefined) => {
+            return Err(failed(
+                RuleFailureKind::FailMissing,
+                "fail is undefined without input; add \"default fail := false\"",
+            ));
+        }
+        Ok(RegoValue::Set(_)) => {
+            return Err(failed(
+                RuleFailureKind::FailMissing,
+                "fail must be a boolean rule; the partial set form \"fail contains ...\" is not supported",
+            ));
+        }
+        Ok(other @ RegoValue::Json(_)) => {
+            return Err(failed(
+                RuleFailureKind::FailMissing,
+                format!(
+                    "fail must be a boolean, but was {}",
+                    article(other.type_name())
+                ),
+            ));
         }
         Err(f) => return Err(rego_error(&f, policy_timeout, "fail")),
     }

@@ -11,9 +11,11 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some widget in input.aws.example.widget
-	print("checking", widget.id)
-	widget.name == "printed"
-	finding := {"resource_id": widget.id, "message": "printed"}
+default fail := false
+
+fail if {
+	print("checking", input.id)
+	input.name == "printed"
 }
+
+message := "printed"

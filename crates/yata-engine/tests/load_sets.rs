@@ -144,8 +144,10 @@ fn rule_level_failures_are_all_collected_and_other_rules_load() {
     pairs.sort_by(|a, b| a.0.cmp(&b.0));
     let mut expected: Vec<(String, R)> = [
         ("Bad-Dir/rule.rego", R::InvalidName),
-        ("fail_missing/complete_rule.rego", R::FailMissing),
+        ("fail_missing/no_default.rego", R::FailMissing),
         ("fail_missing/no_fail.rego", R::FailMissing),
+        ("fail_missing/not_boolean.rego", R::FailMissing),
+        ("fail_missing/partial_set.rego", R::FailMissing),
         ("invalid_name/1digit.rego", R::InvalidName),
         ("invalid_name/as.rego", R::InvalidName),
         ("metadata/bad_severity.rego", R::MetadataInvalid),
@@ -177,23 +179,30 @@ fn rule_level_failures_are_all_collected_and_other_rules_load() {
             "test_policies.expected.string_and_object",
             "test_policies.expected.unknown_id",
             "test_policies.expected.unknown_id_region",
-            "test_policies.fail_element.bad_path",
-            "test_policies.fail_element.missing_message",
-            "test_policies.fail_element.region_not_string",
-            "test_policies.fail_element.unknown_id",
-            "test_policies.fail_element.unknown_id_region",
+            "test_policies.fixture_format.bad_context",
             "test_policies.fixture_format.bad_resource",
+            "test_policies.fixture_format.data_dup_id_region",
             "test_policies.fixture_format.fail_without_fail",
-            "test_policies.fixture_format.input_dup_id_region",
             "test_policies.fixture_format.missing_declared_type",
+            "test_policies.fixture_format.old_input_key",
             "test_policies.fixture_format.pass_with_fail",
             "test_policies.fixture_format.undeclared_type",
             "test_policies.fixture_format.unknown_file",
+            "test_policies.fixture_format.unknown_yata_key",
             "test_policies.fixtures_missing.no_dir",
             "test_policies.fixtures_missing.no_fail_fixture",
             "test_policies.fixtures_missing.no_pass_fixture",
             "test_policies.mismatch.wrong_expectation",
             "test_policies.ok.passing_rule",
+            "test_policies.rule_contract.fail_conflict",
+            "test_policies.rule_contract.fail_not_boolean",
+            "test_policies.rule_contract.message_conflict",
+            "test_policies.rule_contract.message_empty",
+            "test_policies.rule_contract.message_not_string",
+            "test_policies.rule_contract.reason_bad_path",
+            "test_policies.rule_contract.reason_not_object",
+            "test_policies.rule_contract.reason_path_null",
+            "test_policies.rule_contract.undefined_at_runtime",
             "test_policies.timeout.slow",
         ]
     );
@@ -227,6 +236,39 @@ fn rule_level_failures_are_all_collected_and_other_rules_load() {
             .contains("metadata.severity must be one of critical, high, medium, low, info"),
         "{}",
         severity.message
+    );
+}
+
+#[test]
+fn fail_missing_messages_name_the_cause() {
+    let mut opts = options(LoadMode::Rules);
+    opts.policy_timeout = Duration::from_secs(1);
+    let loaded = load_one(&policies("rule_failures"), &opts).unwrap();
+    let message = |name: &str| {
+        let path = format!("fail_missing/{name}.rego");
+        let f = loaded
+            .rule_failures
+            .iter()
+            .find(|f| f.path == path)
+            .unwrap_or_else(|| panic!("no failure for {path}"));
+        assert_eq!(f.kind, R::FailMissing);
+        f.message.clone()
+    };
+    assert_eq!(
+        message("no_fail"),
+        "rule has no \"fail\"; add \"default fail := false\" and \"fail if { ... }\""
+    );
+    assert_eq!(
+        message("no_default"),
+        "fail is undefined without input; add \"default fail := false\""
+    );
+    assert_eq!(
+        message("partial_set"),
+        "fail must be a boolean rule; the partial set form \"fail contains ...\" is not supported"
+    );
+    assert_eq!(
+        message("not_boolean"),
+        "fail must be a boolean, but was a string"
     );
 }
 

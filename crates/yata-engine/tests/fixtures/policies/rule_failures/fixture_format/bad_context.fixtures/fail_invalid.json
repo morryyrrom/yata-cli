@@ -1,0 +1,8 @@
+{
+  "description": "The context has no regions and an extra key, and the account has no id",
+  "data": {
+    "yata": { "context": { "account": { "account": "aws-123456789012", "provider": "aws" }, "extra": 1 } },
+    "aws": { "example": { "widget": [{"id": "widget-1", "type": "aws.example.widget", "account": "aws-123456789012", "region": "us-east-1", "name": "example", "tags": {"flag": "bad"}, "configuration": {}}] } }
+  },
+  "expected": { "fail": ["widget-1"] }
+}

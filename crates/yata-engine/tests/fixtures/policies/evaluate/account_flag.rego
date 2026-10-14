@@ -11,8 +11,8 @@ metadata := {
 	"references": [],
 }
 
-fail contains finding if {
-	some a in input.aws.account.account
-	a.configuration.Flagged == true
-	finding := {"resource_id": a.id, "message": "Account is flagged"}
-}
+default fail := false
+
+fail if input.configuration.Flagged == true
+
+message := "Account is flagged"

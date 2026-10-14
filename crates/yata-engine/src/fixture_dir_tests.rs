@@ -103,7 +103,7 @@ fn fixture_directory_entries_are_listed_with_their_kinds() {
     write(
         dir.path(),
         "r.rego",
-        "package yata.rules.tmp.r\n\nimport rego.v1\n\nmetadata := {\"title\": \"t\", \"severity\": \"low\", \"description\": \"d\", \"remediation\": \"r\", \"target_type\": \"aws.example.widget\", \"references\": []}\n\nfail contains 1 if { false }\n",
+        "package yata.rules.tmp.r\n\nimport rego.v1\n\nmetadata := {\"title\": \"t\", \"severity\": \"low\", \"description\": \"d\", \"remediation\": \"r\", \"target_type\": \"aws.example.widget\", \"references\": []}\n\ndefault fail := false\n",
     );
     write(dir.path(), "r.fixtures/pass_a.json", "{}");
     write(dir.path(), "r.fixtures/.DS_Store", "");

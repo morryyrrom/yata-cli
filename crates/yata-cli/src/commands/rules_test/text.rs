@@ -130,12 +130,10 @@ fn detail_lines(details: &FailureDetails) -> Vec<String> {
                     escape_controls(&item.id),
                     escape_controls(&item.region)
                 );
-                if item.messages.is_empty() {
-                    lines.push(format!("unexpected: {who}"));
-                }
-                for message in &item.messages {
-                    lines.push(format!("unexpected: {who}: {}", escape_controls(message)));
-                }
+                lines.push(format!(
+                    "unexpected: {who}: {}",
+                    escape_controls(&item.message)
+                ));
             }
         }
         FailureDetails::Locations { locations } => {

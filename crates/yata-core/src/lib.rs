@@ -22,7 +22,7 @@ pub use resource::Resource;
 pub use resource_set::ResourceSet;
 pub use resource_type_info::ResourceTypeInfo;
 pub use rule_metadata::{Reference, RuleMetadata};
-pub use rule_outcome::{IncompleteResource, RuleOutcome, RuleStatus, SkipReason};
+pub use rule_outcome::{IncompleteResource, RuleErrorKind, RuleOutcome, RuleStatus, SkipReason};
 pub use rule_result::{ResultResource, ResultStatus, RuleResult};
 pub use scope::Scope;
 pub use severity::Severity;

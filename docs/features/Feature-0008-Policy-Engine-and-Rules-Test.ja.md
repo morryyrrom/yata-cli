@@ -46,7 +46,7 @@
 | 段階 | 範囲 | 完了条件 | 依存 |
 | --- | --- | --- | --- |
 | P1: 読み込み・検証 | 依存の変更(下の「依存の追加」。ルートの `Cargo.toml` の変更はこの段階の 1 回だけ。`Cargo.lock` はこの段階と P4 で変わる)、`yata-core` の `Severity`・`RuleMetadata`・`Reference`・`PolicySetInfo`、`yata-engine` の `limits`・`names`・`version`・`manifest`・`files`・`walk`・`library`・`rule`・`metadata`・`engine_config`・`loader`・`error`、読み込みのテストと、そのためのテスト用のポリシーのセット | 正しいセットが読み込め、ディレクトリ全体の失敗とルール単位の失敗のうち読み込み(走査を含む)の段階で見つけるもののすべての種類が、決めた種類として報告されること。走査で見つける `orphan_fixtures` と、フィクスチャのディレクトリの `symlink`(`LoadMode::RulesWithFixtures` のとき)を含む。fmt・clippy・test が通ること | この設計のマージと、#7 の実装の PR のマージ(下の「共有ファイルの順序」) |
-| P2: 評価・結果の作成 | `yata-core` の `RuleOutcome` などの結果の型、`yata-engine` の `input`・`findings`・`evaluate`、評価のテスト | 状態の判定順の 6 つの場合、`resource_region` の有無による対応づけ、`fail` の要素の誤り(`resource_region` が文字列でない、その `id` とリージョンのリソースが無い、など)、時間切れ、`incomplete_resources` の `region` がテストで確かめられていること | P1。#7 の実装の PR(`Inventory`、`Resource`、`ResourceSet` などの型) |
+| P2: 評価・結果の作成 | `yata-core` の `RuleOutcome` などの結果の型、`yata-engine` の `input`(`data` の組み立て)・`per_resource`(リソースごとの評価と結果)・`evaluate`、評価のテスト | 状態の判定順の 6 つの場合、リソースごとの結果、ルールの規約の誤り(`fail` が undefined・真偽値でない、`message` / `reason` の形、conflict)、時間切れ(合計への上限を含む)、`incomplete_resources` の `region` がテストで確かめられていること | P1。#7 の実装の PR(`Inventory`、`Resource`、`ResourceSet` などの型) |
 | P3: ルールのテストの機能 | `yata-engine` の `testing`(フィクスチャの読み込み・検証、ダミー値、期待値の比べ方、実行、`TestReport`)、テスト用のポリシーのセットのフィクスチャの失敗のケース | フィクスチャに関するすべての失敗の種類と、`expected.fail` の文字列とオブジェクトの両方の形がテストで確かめられていること | P2 |
 | P4: `yata rules test` のコマンド | `yata-cli` の引数の解析(`rules test` のサブコマンド)、ポリシーのディレクトリの決定、ログの初期化、終了コード、中断、プロバイダの対応の検査、text / JSON の出力、CLI の統合テスト | `yata rules test` が正しいテスト用のセットで終了コード 0 になり、各失敗の種類で決めた終了コード(1 / 2)になること。JSON の出力が期待するファイルと一致すること | P3。#7 の実装の PR(`supported_resource_types()`) |
 
@@ -343,7 +343,7 @@ regorus 0.12.0 のソースで次を確かめ、`set_execution_timer_config` で
 
 **リソースごとの評価での上限の掛け方**(ADR-0030 で追加): 上限は、ルール × アカウント(フィクスチャでは 1 つのフィクスチャ)の、リソースごとの評価の合計に掛けます。`eval_rule` は呼び出しのたびにタイマーを開始し直すため、そのままではリソースごと(`eval_rule` の呼び出しごと)の上限になります。次のようにします。
 
-- ルール × アカウントの評価を始めるときに、開始の時刻を記録する(`std::time::Instant`)。開始からの経過時間には、`add_data` と、最初の `eval_rule` での解析(regorus のタイマーの計測の外)の時間も含める
+- ルール × アカウントの評価を始めるときに、開始の時刻を記録する(`std::time::Instant`。リソースごとの評価の関数の冒頭で、`clone()` と `add_data` の前。`Inventory` から `data` を組み立てる変換は含まない)。開始からの経過時間には、`add_data` と、最初の `eval_rule` での解析(regorus のタイマーの計測の外)の時間も含める
 - `eval_rule` を呼ぶたびに、その前に「残りの時間 = 上限 − 開始からの経過時間」を求め、`set_execution_timer_config(ExecutionTimerConfig { limit: 残りの時間, check_interval: 64 })` で設定し直す。残りが 0 以下なら呼ばずに `Timeout` にする
 - `set_execution_timer_config` は設定を置き換えるだけで、エンジンの再準備(解析のやり直し)を起こさない(regorus 0.12.0 のソースで確認。`prepared` を変えない)
 - 時間切れの `Timeout { limit }` の `limit` は、残りの時間ではなく `--policy-timeout` の値にする(利用者に見せる上限)
@@ -422,10 +422,11 @@ regorus の `allocator-memory-limits` の機能では制限しません。ファ
 - `Engine` の `message`(regorus のメッセージ)は値を含みうる(例: 関数の conflict の `function produced multiple outputs ...`)。加工せずに持ち、`EvaluationError` に種類を返す `kind()` と、regorus のメッセージを除いた説明(`yata-engine` が作る説明とリソースの `id`・リージョン。値を含まない)を返す関数を用意する
 - 種類(`kind()`)と variant の対応:
   - `Timeout` → `timeout`
-  - `Engine` で、regorus のメッセージが完全ルール・関数の conflict のもの(`rules should not produce multiple outputs`、`complete rules should not produce multiple outputs`、`function produced multiple outputs` など。文言で見分ける)→ `conflict`
+  - `Engine` で、regorus のメッセージが完全ルール・関数の conflict のもの(`rule conflicts with the following rule`、`rules should not produce multiple outputs`、`complete rules should not produce multiple outputs`、`function produced multiple outputs` など。文言で見分ける)→ `conflict`
   - `Engine` のそれ以外 → `engine`
   - `FailUndefined`、`FailNotBoolean`、`InvalidMessage`、`InvalidReason`(`path` の形の誤りを含む)→ `type`(ルールの規約の誤り)
   - `DuplicateResource` → `internal`(エンジンに渡した入力の誤り。`Inventory` の検証で起きないはずの状態)
+  - `InvalidResource`(`target_type` のリソースに文字列の `id` かリージョンが無い)→ `internal`
 - ログ([エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md) の「ルールの評価のエラーのログ」と同じ):
 
 | レベル | 内容 |
@@ -461,7 +462,7 @@ pub fn evaluate(rules: &[&Rule], inventory: &Inventory) -> Vec<RuleOutcome>;
 ```
 
 - ルール × アカウントごとに、ルールが持つエンジンを `clone()` して使う(`&Rule` を変更しないため。リソースごとには `clone()` せず、`set_input` で `input` だけを替える)
-- ルールの状態のエラーは `RuleOutcome.error` に、英語の 1 行の説明(`EvaluationError` の `Display`)として入れる。あわせて、エラーの種類と、regorus のメッセージを除いた説明も `RuleOutcome` に持たせる(`--omit-values` とログのため。項目名は実装時に決めてよい)
+- ルールの状態のエラーは `RuleOutcome.error` に、英語の 1 行の説明(`EvaluationError` の `Display`)として入れる。あわせて、エラーの種類と、regorus のメッセージを除いた説明も `RuleOutcome` に持たせる(`--omit-values` とログのため。項目名は `RuleOutcome.error_kind` と `RuleOutcome.error_summary`。どちらも JSON にはシリアライズしない内部の値で、レポートでの扱いは scan / レポートの Issue で決める)
 
 ## `yata rules test`
 
@@ -912,12 +913,15 @@ pub struct RuleFailure {
 pub enum EvaluationError {
     /// `resource` is the resource being evaluated when the limit was hit, if any.
     Timeout { limit: Duration, resource: Option<ResourceKey> },
-    Engine { message: String, resource: ResourceKey },
+    /// `resource` is `None` when the error is not tied to a resource (e.g. adding `data`).
+    Engine { message: String, resource: Option<ResourceKey> },
     FailUndefined { resource: ResourceKey },
     FailNotBoolean { found: &'static str, resource: ResourceKey },
     InvalidMessage { reason: String, resource: ResourceKey },
     InvalidReason { reason: String, resource: ResourceKey },
     DuplicateResource { resource_id: String, region: String },
+    /// A target resource has no string `id` or `region`. `index` is its position in the array.
+    InvalidResource { index: usize },
 }
 
 /// `(id, region)` of the target resource an evaluation error belongs to.
@@ -1124,6 +1128,15 @@ P1 の実装で確かめた結果です(regorus 0.12.0)。
 | conflict のエラー | `message` の 2 つの本体が別の値で成り立つとき、`eval_rule` がエラー(`rules should not produce multiple outputs` など)を返し、時間切れと見分けられるか | エラーのメッセージで見分ける |
 | タイマーの設定し直し | `eval_rule` の前に `set_execution_timer_config` で `limit` を変えたとき、その値で打ち切られ、再準備が起きないか | 残りの時間で打ち切れない場合は、リソースごとの評価の前後で経過時間を測り、合計が上限を超えた時点で `Timeout` にする(1 回の `eval_rule` の上限は `--policy-timeout` のまま) |
 | 性能 | 1 万件の `target_type` のリソースと単純なルールで、1 回の評価の固定の費用と、ルール × アカウントの評価の時間を測る。すべてのリソースが合格の場合と、すべてが不合格の場合(`message` / `reason` の評価を含む)の両方を測る(上の「リソースごとの評価の性能」の見積もりと比べる) | 見積もりより大きく遅ければ、PR に測定の結果を書き、全体設計の未決事項「`data` だけに依存する計算の共有」と評価の並列化の検討を早める |
+
+リソースごとの評価の実装で確かめた結果です(regorus 0.12.0)。
+
+- `data.yata` とルールのパッケージ: `add_data` で `{"yata": {"context": ...}, "aws": ...}` を入れたエンジンで、パッケージ `yata.rules.<ID>` のルールと `yata.lib.<name>` のライブラリが評価でき、ルールから `data.yata.context.regions` を参照できる。`eval_rule("data.yata.rules.<ID>.fail")` は `data` の `yata` の下の基本の文書と衝突しない。違いは無く、設計どおり。
+- `set_input` の後の再評価: 準備済みのエンジンで `set_input` だけを替えて `eval_rule` を繰り返しても、前のリソースの規則の値(補助のルール、`message`)は残らない。`with input as` で `input` を差し替える書き方も、ルールの中で効く。評価ごとのエンジンの `clone()` は要らない。再準備(解析のやり直し)が起きていないことは、1 リソースの評価が 25 マイクロ秒程度で済むこと(下の性能)と整合する(再準備の有無そのものは測っていない)。
+- `default` と `eval_rule`: `default fail := false` だけが成り立つとき、`eval_rule` は `false` を返す。`default` が無く本体が成り立たないときは未定義の値(`Value::Undefined`)を返す。ルールに `message` が無いときは、`not a valid rule path` のエラーになる(`fail` が無いときも同じ。実装は両者を区別して持ち、`message` / `reason` では「無い」と「未定義」を同じに扱い、読み込み時の `fail` の確認では「無い」と「未定義」でメッセージを分ける)。
+- conflict のエラー: 2 つの本体が別の値で成り立つと、`eval_rule` はエラーを返し、`LimitError` ではないので時間切れと見分けられる。ただし文言は 1 通りではない。同じ名前の完全ルールを `message := "a" if ...` と `message := "b" if ...` の 2 つの定義で書き、両方が成り立った場合は `rule conflicts with the following rule: ...`(`multiple outputs` を含まない)。関数の conflict は `function produced multiple outputs ...`、1 つの定義の中の複数の出力は `complete rules should not produce multiple outputs`。このため `kind()` は、メッセージに `multiple outputs` または `rule conflicts with` を含むものを `conflict` とする(「リソースごとの評価と結果」の「文言で見分ける」の例に、後者を加える)。
+- タイマーの設定し直し: `eval_rule` の前に `set_execution_timer_config` で `limit` を替えると、替えた値で打ち切られる(50 ミリ秒、120 ミリ秒のどちらでも、その長さ以上かつ十分短い時間で `LimitError` になる)。大きな値に戻した後の同じエンジンも評価できる。再準備が起きないことは、設定を置き換えるだけで `prepared` を変えないソース(上の「評価時間の上限の実現方法」)で確かめている。リソースごとの評価の合計に上限が掛かること(1 つずつは短いが合計で上限を超えるルールが時間切れになること)は、評価のテストで確かめている。
+- 性能: 1 万件の `target_type` のリソース(`configuration` は小さなオブジェクト)と単純なルール(`input.tags` の 1 項目を見る)で、`yata_engine::evaluate` 全体(`data` の組み立て、`add_data`、評価、結果の作成を含む)を release ビルドで 3 回測った。すべて合格: 242〜254 ミリ秒(1 リソースあたり 24〜25 マイクロ秒)。すべて不合格(`message` と `reason` を評価): 399〜412 ミリ秒(1 リソースあたり 40〜41 マイクロ秒)。見積もりの「数十マイクロ秒」の範囲で、不合格の費用は合格の 1.6 倍程度(最大 3 倍の見積もりより小さい)。100 ルール × 1 万リソースなら 1 つのスレッドで 25〜40 秒程度。測定は `crates/yata-engine/tests/evaluate_perf.rs`(`#[ignore]`。`cargo test -p yata-engine --release --test evaluate_perf -- --ignored --nocapture`)。
 
 ## 全体設計の変更
 

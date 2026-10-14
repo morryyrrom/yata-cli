@@ -12,7 +12,8 @@ metadata := {
 }
 
 # The control characters are written as escapes so that this file has none of its own.
-fail contains finding if {
-	some r in input.aws.account.account
-	finding := {"resource_id": r.id, "message": "red \u001b[31mtext\u001b[0m\nsecond line"}
-}
+default fail := false
+
+fail if input.id
+
+message := "red \u001b[31mtext\u001b[0m\nsecond line"

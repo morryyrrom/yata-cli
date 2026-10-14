@@ -663,7 +663,7 @@ import rego.v1
 
 metadata := {\"title\": \"t\", \"severity\": \"low\", \"description\": \"d\", \"remediation\": \"r\", \"target_type\": \"aws.example.widget\", \"references\": [], \"tags\": [sprintf(\"%d\", [h.limit])]}
 
-fail contains 1 if { false }
+default fail := false
 ",
         )
         .unwrap();

@@ -1,8 +1,7 @@
 {
   "description": "Widget with flag good",
-  "input": {
-    "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" },
-    "regions": ["us-east-1"],
+  "data": {
+    "yata": { "context": { "account": { "account": "aws-123456789012", "id": "123456789012", "provider": "aws" }, "regions": ["us-east-1"] } },
     "aws": {
       "example": {
         "widget": [
