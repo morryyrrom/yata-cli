@@ -52,22 +52,14 @@ async fn collect(ctx: &CollectContext, region: &str) -> Result<Vec<Resource>, Co
     let client: aws_sdk_iam::Client = ctx.client(region);
 
     // Step 1: all pages of ListPolicies. Any failure fails the whole group.
-    let policies = list_policies(&client).await?;
-    let mut entries: Vec<(String, Option<String>, Value)> = Vec::with_capacity(policies.len());
-    let mut requests: Vec<VersionRequest> = Vec::with_capacity(policies.len());
-    for policy in &policies {
-        let arn = policy
-            .arn()
-            .ok_or_else(|| invalid_response(LIST_POLICIES, "MissingArn"))?
-            .to_owned();
-        entries.push((
-            arn.clone(),
-            policy.policy_name().map(str::to_owned),
-            policy_value(policy)?,
-        ));
+    let listed = list_policies(&client).await?;
+    let mut entries: Vec<(String, Option<String>, Value)> = Vec::with_capacity(listed.len());
+    let mut requests: Vec<VersionRequest> = Vec::with_capacity(listed.len());
+    for item in listed {
+        entries.push((item.arn.clone(), item.name, item.value));
         requests.push(VersionRequest {
-            arn,
-            default_version_id: policy.default_version_id().map(str::to_owned),
+            arn: item.arn,
+            default_version_id: item.default_version_id,
         });
     }
 
@@ -104,29 +96,51 @@ async fn collect(ctx: &CollectContext, region: &str) -> Result<Vec<Resource>, Co
     Ok(resources)
 }
 
+/// One listed policy: what the later steps need and the `ListPolicies` value of its resource.
+struct ListedPolicy {
+    arn: String,
+    name: Option<String>,
+    default_version_id: Option<String>,
+    value: Value,
+}
+
 /// Fetches all pages of `ListPolicies` in the order the API returned them.
+///
+/// The value of each policy keeps the shape of the operation output: an object holding only the
+/// array `Policies` with the element of that policy (paging fields are not included).
 ///
 /// If no page returns `Policies` at all, the response is invalid: AWS managed policies always
 /// exist, and treating it as zero policies would silently drop the input of the rules.
-async fn list_policies(client: &aws_sdk_iam::Client) -> Result<Vec<Policy>, CollectError> {
-    let mut policies = Vec::new();
+async fn list_policies(client: &aws_sdk_iam::Client) -> Result<Vec<ListedPolicy>, CollectError> {
+    let mut listed = Vec::new();
     let mut any_page_with_policies = false;
     let mut pages = client.list_policies().into_paginator().send();
     while let Some(page) = pages.next().await {
         let page = page.map_err(|err| CollectError::from_sdk(LIST_POLICIES, &err))?;
-        if let Some(page_policies) = page.policies {
+        if let Some(page_policies) = &page.policies {
             any_page_with_policies = true;
-            policies.extend(page_policies);
+            for policy in page_policies {
+                let arn = policy
+                    .arn()
+                    .ok_or_else(|| invalid_response(LIST_POLICIES, "MissingArn"))?
+                    .to_owned();
+                listed.push(ListedPolicy {
+                    arn,
+                    name: policy.policy_name().map(str::to_owned),
+                    default_version_id: policy.default_version_id().map(str::to_owned),
+                    value: json!({ "Policies": [policy_element(policy)?] }),
+                });
+            }
         }
     }
     if !any_page_with_policies {
         return Err(invalid_response(LIST_POLICIES, "MissingPolicies"));
     }
-    Ok(policies)
+    Ok(listed)
 }
 
-/// Converts an element of `ListPolicies` to its configuration value (all twelve members).
-fn policy_value(policy: &Policy) -> Result<Value, CollectError> {
+/// Converts an element of `ListPolicies` to JSON (all twelve members).
+fn policy_element(policy: &Policy) -> Result<Value, CollectError> {
     let create_date = opt_datetime_strict(policy.create_date(), LIST_POLICIES)?;
     let update_date = opt_datetime_strict(policy.update_date(), LIST_POLICIES)?;
     let tags = match policy.tags.as_deref() {
@@ -468,7 +482,7 @@ mod tests {
         }
         assert_eq!(resources[2].name.as_deref(), Some("AdministratorAccess"));
         assert_eq!(
-            resources[1].configuration["ListPolicies"]["AttachmentCount"],
+            resources[1].configuration["ListPolicies"]["Policies"][0]["AttachmentCount"],
             json!(0)
         );
         assert_eq!(
@@ -552,6 +566,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_listing_value_is_an_object_with_only_the_element_array() {
+        let rules = standard_rules();
+        let resources = sorted(collect(&context(&rules), "us-east-1").await.unwrap());
+        assert_eq!(resources.len(), 3);
+        for resource in &resources {
+            let value = resource.configuration["ListPolicies"].as_object().unwrap();
+            assert_eq!(value.keys().collect::<Vec<_>>(), ["Policies"]);
+            assert!(!value.contains_key("IsTruncated") && !value.contains_key("Marker"));
+            let policies = value["Policies"].as_array().unwrap();
+            assert_eq!(policies.len(), 1);
+            assert_eq!(policies[0]["Arn"], json!(resource.id));
+        }
+    }
+
+    #[tokio::test]
     async fn a_failed_version_call_marks_only_that_policy() {
         for (code, kind) in [
             ("Throttling", "throttled"),
@@ -577,7 +606,7 @@ mod tests {
             assert_eq!(mark.as_object().unwrap().len(), 1);
             // The listing data is still there.
             assert_eq!(
-                resources[1].configuration["ListPolicies"]["Arn"],
+                resources[1].configuration["ListPolicies"]["Policies"][0]["Arn"],
                 json!(CUSTOM_ARN)
             );
         }
@@ -603,7 +632,7 @@ mod tests {
             json!("invalid response when calling ListPolicies (MissingDefaultVersionId)")
         );
         assert_eq!(
-            resources[0].configuration["ListPolicies"]["DefaultVersionId"],
+            resources[0].configuration["ListPolicies"]["Policies"][0]["DefaultVersionId"],
             Value::Null
         );
     }

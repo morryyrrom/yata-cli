@@ -19,6 +19,10 @@ classDiagram
     }
 
     class ListUsers {
+        +Array Users
+    }
+
+    class User {
         +String Arn
         +String CreateDate
         +String PasswordLastUsed
@@ -46,14 +50,16 @@ classDiagram
         +Object planned
     }
 
-    note for Resource "id = ListUsers Arn. name = UserName. tags is always an empty object. region = global"
-    note for ListUsers "Each key is null when the API does not return it. PermissionsBoundary and Tags are not returned by ListUsers"
+    note for Resource "id = ListUsers.Users[0].Arn. name = UserName. tags is always an empty object. region = global"
+    note for ListUsers "Users holds one element only (that user)"
+    note for User "Each key is null when the API does not return it. PermissionsBoundary and Tags are not returned by ListUsers"
     note for ListAttachedUserPolicies "Failure mark replaces this key only for the failed user"
     note for ListUserPolicies "Failure mark replaces this key only for the failed user"
     note for GetCredentialReport "Planned key for the credential report Issue. Added after the report row is matched by Arn"
 
     Resource --> Configuration : configuration
     Configuration --> ListUsers : key
+    ListUsers --> User : Users[0]
     Configuration --> ListAttachedUserPolicies : key
     Configuration --> ListUserPolicies : key
     Configuration ..> GetCredentialReport : planned key, added later

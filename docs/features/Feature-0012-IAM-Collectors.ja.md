@@ -42,10 +42,13 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 - **絞り込まない・置き換えない**: 返った要素はすべてリソースにする。アタッチされていないポリシー、AWS 管理ポリシー、パスの違うユーザーも入れる
 - **許す変換**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、ポリシー文書の URL デコードと JSON のパースだけ
 - **秘密の値も伏せない**: この 4 種別の応答には、パスワードやアクセスキーのシークレットは含まれない。含まれる値(ユーザー名、パス、ポリシーの文書など)は、そのまま入れる
-- **ページングの結合**: ページのある操作(`ListUsers`、`ListPolicies`、`ListAttachedUserPolicies`、`ListUserPolicies`)は、SDK のページネーター(`into_paginator()`)で全ページを取り、要素を API が返した順に 1 つの配列につなぐ。ページングの項目(`IsTruncated`、`Marker`)と応答のメタデータは入れない
-  - SDK で `Option` の配列(`ListAttachedUserPolicies` の `AttachedPolicies` など)は、ページネーターの `items()` で平らにせず、ページ(`send()` の各出力)ごとに見る。どのページも配列を返さなければ `null`、1 ページでも返せば、返したページの要素をつないだ配列にする。返らなかったものを黙って空の配列にすると、「空なら合格」のルール(2.13 など)が誤って `pass` になりうるため
-  - SDK で `Option` でない配列(`ListUserPolicies` の `PolicyNames`、`ListUsers` の `Users`。`aws-sdk-iam` 1.128.0 ではどちらも `Vec`)は、そのままつなぐ
-  - `ListPolicies` の `Policies` は SDK で `Option<Vec<Policy>>` だが、要素がリソースそのものになるため、`null` を入れる場所が無い。1 ページでも返せば、返したページの要素をつなぐ。どのページも `Policies` を返さない場合は、組全体の失敗(`invalid_response`)にする(下の「値を変換できない場合」)。AWS 管理ポリシーは常に存在するため、通常は起こらない応答で、0 件として黙って成功すると 2.14 の評価の対象が無くなるため
+- **ページングの結合**: ページのある操作(`ListUsers`、`ListPolicies`、`ListAttachedUserPolicies`、`ListUserPolicies`)は、SDK のページネーター(`into_paginator()`)で全ページを取る。ページは、ページネーターの `items()` で平らにせず、ページ(`send()` の各出力)ごとに見る。値の作り方は、操作の役割で分ける([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「列挙の操作の値」「全ページをつないだ出力」、[ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md))。どの操作でも、ページングの項目(`IsTruncated`、`Marker`)と応答のメタデータは入れない
+  - **列挙の操作**(`ListUsers`、`ListPolicies`): 全ページをつないだ 1 つの出力は作らず、各リソースの値は、その要素を返したページの出力から作る。値は出力の形を保ち、要素の配列をそのリソースの要素 1 つだけの配列にしたもの(`ListUsers` は `{"Users": [<そのユーザーの要素>]}`、`ListPolicies` は `{"Policies": [<そのポリシーの要素>]}`)。どちらの出力も、最上位の項目は要素の配列とページングの項目だけなので、値は要素の配列だけを持つ。リソースは、API が返した順(ページの順、ページの中の要素の順)に作る
+  - `ListUsers` の `Users` は SDK で `Option` でない配列(`aws-sdk-iam` 1.128.0 では `Vec`)で、各ページの要素をそのまま使う
+  - `ListPolicies` の `Policies` は SDK で `Option<Vec<Policy>>` だが、要素がリソースそのものになるため、`null` を入れる場所が無い。`Policies` を返さなかったページからはリソースを作らず、返したページの要素をリソースにする。どのページも `Policies` を返さない場合は、組全体の失敗(`invalid_response`)にする(下の「値を変換できない場合」)。AWS 管理ポリシーは常に存在するため、通常は起こらない応答で、0 件として黙って成功すると 2.14 の評価の対象が無くなるため
+  - **1 つのリソースの情報を取る操作**(`ListAttachedUserPolicies`、`ListUserPolicies`。ユーザーごとに呼ぶ): 全ページを 1 つの出力にまとめ、その操作の値にする。配列の項目(`AttachedPolicies`、`PolicyNames`)は、各ページの要素をページの順につなぐ。どちらの出力も、ページングの項目のほかに配列でない最上位の項目が無いため、配列でない項目がページの間で違うときに応答を不正(`invalid_response`)とする規則は、この 2 つの操作では当てはまる場面が無い
+  - SDK で `Option` の配列(`ListAttachedUserPolicies` の `AttachedPolicies`)は、どのページも配列を返さなければ `null`、1 ページでも返せば、返したページの要素をつないだ配列にする。返らなかったものを黙って空の配列にすると、「空なら合格」のルール(2.13 など)が誤って `pass` になりうるため
+  - SDK で `Option` でない配列(`ListUserPolicies` の `PolicyNames`。`aws-sdk-iam` 1.128.0 では `Vec`)は、そのままつなぐ
 - **途中のページの失敗**: あるページの取得が失敗したら、それまでのページの結果は使わず、その操作全体を失敗として扱う(組全体の失敗、または失敗の印。一部のページだけを入れることはしない)
 - **グローバルの扱い**: 4 種別とも `Scope::Global`。`collect` に渡されるリージョン(`us-east-1`)に向けたクライアントを `ctx.client::<aws_sdk_iam::Client>(region)` で作る。リソースの `region` は `global`
 
@@ -186,7 +189,7 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 | 操作 | `ListUsers`(列挙)、`ListAttachedUserPolicies`・`ListUserPolicies`(ユーザーごと。`UserName` は必須の識別子) |
 | `required_permissions` | `["iam:ListUsers", "iam:ListAttachedUserPolicies", "iam:ListUserPolicies"]`。認証情報レポートの 2 つ(`iam:GenerateCredentialReport`、`iam:GetCredentialReport`)を加えた 5 つの一覧は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「構成」 |
 | リソースの件数 | `ListUsers` が返したユーザーの数(全ページ) |
-| `id` | ユーザーの ARN(`ListUsers` の `Arn`。例: `arn:aws:iam::123456789012:user/example-user`) |
+| `id` | ユーザーの ARN(`ListUsers` の `Users[0].Arn`。例: `arn:aws:iam::123456789012:user/example-user`) |
 | `name` | `UserName` |
 | `tags` | 常に `{}`(タグを取得しない種別。`ListUsers` は API の仕様で `Tags` を返さない。下の注記) |
 | `null` にするエラー | なし |
@@ -198,14 +201,18 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 ```json
 {
   "ListUsers": {
-    "Arn": "arn:aws:iam::123456789012:user/example-user",
-    "CreateDate": "2026-01-01T00:00:00Z",
-    "PasswordLastUsed": "2026-02-01T00:00:00Z",
-    "Path": "/",
-    "PermissionsBoundary": null,
-    "Tags": null,
-    "UserId": "AIDAEXAMPLEEXAMPLE01",
-    "UserName": "example-user"
+    "Users": [
+      {
+        "Arn": "arn:aws:iam::123456789012:user/example-user",
+        "CreateDate": "2026-01-01T00:00:00Z",
+        "PasswordLastUsed": "2026-02-01T00:00:00Z",
+        "Path": "/",
+        "PermissionsBoundary": null,
+        "Tags": null,
+        "UserId": "AIDAEXAMPLEEXAMPLE01",
+        "UserName": "example-user"
+      }
+    ]
   },
   "ListAttachedUserPolicies": {
     "AttachedPolicies": [
@@ -218,12 +225,12 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 }
 ```
 
-- `ListUsers` の値は、出力の `Users` の中のそのユーザーの要素。SDK の `User` の 8 項目(`Path`、`UserName`、`UserId`、`Arn`、`CreateDate`、`PasswordLastUsed`、`PermissionsBoundary`、`Tags`)をすべて入れる
+- `ListUsers` の値は、出力の形を保ち、`Users` をそのユーザーの要素 1 つだけの配列にしたもの(`{"Users": [<そのユーザーの要素>]}`。上の「共通の方針」のページングの結合)。ページングの項目(`IsTruncated`、`Marker`)は入れない。ルールは `ListUsers.Users[0].<項目>` で参照する。要素には、SDK の `User` の 8 項目(`Path`、`UserName`、`UserId`、`Arn`、`CreateDate`、`PasswordLastUsed`、`PermissionsBoundary`、`Tags`)をすべて入れる
   - `PermissionsBoundary` が返った場合は `{"PermissionsBoundaryArn": ..., "PermissionsBoundaryType": ...}`、`Tags` が返った場合は `[{"Key": ..., "Value": ...}]`
   - `ListUsers` は API の仕様で `PermissionsBoundary` と `Tags` を返さない(API リファレンスの注記)。このため通常はどちらも `null` で、リソースの `tags` も `{}` になる。ルールは、`null` を「境界・タグが無い」と読んではならない。これらを取るには `GetUser` / `ListUserTags` が要り、この範囲では取らない(未決事項「ユーザーとポリシーのタグ」)
   - `aws.iam.user` は、この範囲ではタグを取得しない種別として扱う。リソースの `tags` は常に `{}` で、「タグが無い」ことを表さない。ルールはこの種別の `tags` を判定に使わない
   - `PasswordLastUsed` は、パスワードを使ったことが無い場合などに返らず `null`
-- `ListAttachedUserPolicies` の値は、出力のうちページングの項目を除いたもの(`{"AttachedPolicies": [...]}`。全ページの要素をつなぐ)。要素は `PolicyName`、`PolicyArn`。どのページも `AttachedPolicies` を返さなければ `{"AttachedPolicies": null}`(上の「共通の方針」のページの結合)
+- `ListAttachedUserPolicies` の値は、出力のうちページングの項目を除いたもの(`{"AttachedPolicies": [...]}`。全ページの要素をつなぐ)。要素は `PolicyName`、`PolicyArn`。どのページも `AttachedPolicies` を返さなければ `{"AttachedPolicies": null}`(上の「共通の方針」のページングの結合)
 - `ListUserPolicies` の値は `{"PolicyNames": [...]}`(全ページをつなぐ)。インラインポリシーの名前だけで、文書(`GetUserPolicy`)は取らない([最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) の「`aws.iam.user`」)
 - 2.13 は、`ListAttachedUserPolicies.AttachedPolicies` と `ListUserPolicies.PolicyNames` が空かを見る
 
@@ -252,7 +259,7 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 | 操作 | `ListPolicies`(列挙)、`GetPolicyVersion`(ポリシーごと。`PolicyArn` と `VersionId` は必須の識別子) |
 | `required_permissions` | `["iam:ListPolicies", "iam:GetPolicyVersion"]` |
 | リソースの件数 | `ListPolicies` が返したポリシーの数(全ページ。カスタマー管理ポリシーと AWS 管理ポリシーのすべて) |
-| `id` | ポリシーの ARN(`ListPolicies` の `Arn`。例: `arn:aws:iam::aws:policy/AdministratorAccess`、`arn:aws:iam::123456789012:policy/example-policy`) |
+| `id` | ポリシーの ARN(`ListPolicies` の `Policies[0].Arn`。例: `arn:aws:iam::aws:policy/AdministratorAccess`、`arn:aws:iam::123456789012:policy/example-policy`) |
 | `name` | `PolicyName`(返らなければキーを出さない) |
 | `tags` | 常に `{}`(タグを取得しない種別。`ListPolicies` は API の仕様でタグを返さない。下の注記) |
 | `null` にするエラー | なし |
@@ -266,18 +273,22 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 ```json
 {
   "ListPolicies": {
-    "Arn": "arn:aws:iam::aws:policy/AdministratorAccess",
-    "AttachmentCount": 1,
-    "CreateDate": "2015-02-06T18:39:46Z",
-    "DefaultVersionId": "v1",
-    "Description": null,
-    "IsAttachable": true,
-    "Path": "/",
-    "PermissionsBoundaryUsageCount": 0,
-    "PolicyId": "ANPAEXAMPLEEXAMPLE01",
-    "PolicyName": "AdministratorAccess",
-    "Tags": null,
-    "UpdateDate": "2015-02-06T18:39:46Z"
+    "Policies": [
+      {
+        "Arn": "arn:aws:iam::aws:policy/AdministratorAccess",
+        "AttachmentCount": 1,
+        "CreateDate": "2015-02-06T18:39:46Z",
+        "DefaultVersionId": "v1",
+        "Description": null,
+        "IsAttachable": true,
+        "Path": "/",
+        "PermissionsBoundaryUsageCount": 0,
+        "PolicyId": "ANPAEXAMPLEEXAMPLE01",
+        "PolicyName": "AdministratorAccess",
+        "Tags": null,
+        "UpdateDate": "2015-02-06T18:39:46Z"
+      }
+    ]
   },
   "GetPolicyVersion": {
     "PolicyVersion": {
@@ -293,10 +304,10 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 }
 ```
 
-- `ListPolicies` の値は、出力の `Policies` の中のそのポリシーの要素。SDK の `Policy` の 12 項目(`PolicyName`、`PolicyId`、`Arn`、`Path`、`DefaultVersionId`、`AttachmentCount`、`PermissionsBoundaryUsageCount`、`IsAttachable`、`Description`、`CreateDate`、`UpdateDate`、`Tags`)をすべて入れる。返らない項目は `null`
+- `ListPolicies` の値は、出力の形を保ち、`Policies` をそのポリシーの要素 1 つだけの配列にしたもの(`{"Policies": [<そのポリシーの要素>]}`。上の「共通の方針」のページングの結合)。ページングの項目(`IsTruncated`、`Marker`)は入れない。ルールは `ListPolicies.Policies[0].<項目>` で参照する。要素には、SDK の `Policy` の 12 項目(`PolicyName`、`PolicyId`、`Arn`、`Path`、`DefaultVersionId`、`AttachmentCount`、`PermissionsBoundaryUsageCount`、`IsAttachable`、`Description`、`CreateDate`、`UpdateDate`、`Tags`)をすべて入れる。返らない項目は `null`
 - `GetPolicyVersion` は、そのポリシーの `DefaultVersionId` の版を取る。値は出力全体(`{"PolicyVersion": {...}}`)。`PolicyVersion` の 4 項目(`Document`、`VersionId`、`IsDefaultVersion`、`CreateDate`)をすべて入れる。`PolicyVersion` が返らなかった場合は `{"PolicyVersion": null}`
 - 既定の版以外の版(`ListPolicyVersions`)は取らない
-- `ListPolicies` はタグを返さないため、構成情報の `Tags` は通常 `null`。`aws.iam.policy` も、この範囲ではタグを取得しない種別として扱い、リソースの `tags` は常に `{}` で「タグが無い」ことを表さない。ルールはこの種別の `tags` と `ListPolicies.Tags` を判定に使わない(未決事項「ユーザーとポリシーのタグ」)
+- `ListPolicies` はタグを返さないため、構成情報の `Tags` は通常 `null`。`aws.iam.policy` も、この範囲ではタグを取得しない種別として扱い、リソースの `tags` は常に `{}` で「タグが無い」ことを表さない。ルールはこの種別の `tags` と `ListPolicies.Policies[0].Tags` を判定に使わない(未決事項「ユーザーとポリシーのタグ」)
 - アタッチされているかの絞り込み(`AttachmentCount`)と、AWS 管理ポリシーを対象にするかは、2.14 のルールで行う
 
 **`Document` の変換**
@@ -531,10 +542,11 @@ crates/yata-provider-aws/
 ### `aws.iam.user`
 
 - **件数**: `ListUsers` を 2 ページ(`IsTruncated` と `Marker`)で返し、全ユーザーがリソースになること(モックの件数 = リソースの件数)。パスの違うユーザーも入ること
+- **列挙の操作の値**: 2 ページのどちらのページのユーザーでも、`ListUsers` の値が `{"Users": [<そのユーザーの要素>]}`(要素の配列だけで、長さ 1)になり、ページングの項目(`IsTruncated`、`Marker`)を含まないこと([テスト方針](../architecture/Architecture-Testing-Strategy.ja.md) の「コレクターのテスト」)
 - **既定のパラメーター**: `match_requests` で、`ListUsers` に `PathPrefix`・`MaxItems` が無いこと、`ListAttachedUserPolicies` に `PathPrefix`・`MaxItems` が無く `UserName` が一覧のユーザー名であること、`ListUserPolicies` に `MaxItems` が無いことを確かめる(合わない要求には規則が当たらず、テストが失敗する)
 - **ページの規則の見分け方**: `mock_factory` は `RuleMode::MatchAny` で、同じ操作の規則を見分けないと 1 ページ目が繰り返し当たる。1 ページ目の規則は「`Marker` が無い」、2 ページ目の規則は「`Marker` が 1 ページ目の応答の値と等しい」で照合する。既定のパラメーターの検査(`PathPrefix`・`MaxItems` などが無いこと)は、すべてのページの規則の照合に入れる。`aws.iam.policy` の `ListPolicies` も同じ
 - **返らない配列**: `ListAttachedUserPolicies` のどのページも `AttachedPolicies` を返さない応答(HTTP の応答のモックで要素を省く)で `{"AttachedPolicies": null}` になり、空の配列にならないこと。1 ページ目だけが返す場合は、そのページの要素の配列になること
-- **ページングの結合**: `ListAttachedUserPolicies` を 2 ページで返し、要素が順につながること
+- **ページングの結合**: `ListAttachedUserPolicies`・`ListUserPolicies` を 2 ページで返し、要素が順につながり、ページングの項目を含まないこと
 - **失敗の印**: あるユーザーの `ListUserPolicies` だけが `AccessDenied` のとき、そのユーザーのそのキーだけが失敗の印になり、同じユーザーの `ListAttachedUserPolicies` と、ほかのユーザーは値が入ること。`ListAttachedUserPolicies` の 2 ページ目の失敗で、1 ページ目の要素を入れずに失敗の印になること。`NoSuchEntity` で失敗の印(`service`)になること。`Throttling` で `throttled` の失敗の印になること
 - **列挙の失敗**: `ListUsers` の 2 ページ目の失敗で組全体の失敗になること
 - **並行**: 上限 1 と 8 の `CollectContext` で、同じ構成情報になること
@@ -543,6 +555,7 @@ crates/yata-provider-aws/
 ### `aws.iam.policy`
 
 - **件数**: `ListPolicies` を 2 ページで返し、AWS 管理ポリシー(`arn:aws:iam::aws:policy/...`)、`AttachmentCount` が 0 のポリシー、カスタマー管理ポリシーのすべてがリソースになること
+- **列挙の操作の値**: 2 ページのどちらのページのポリシーでも、`ListPolicies` の値が `{"Policies": [<そのポリシーの要素>]}`(要素の配列だけで、長さ 1)になり、ページングの項目(`IsTruncated`、`Marker`)を含まないこと
 - **既定のパラメーター**: `match_requests` で、`ListPolicies` に `Scope`・`OnlyAttached`・`PathPrefix`・`PolicyUsageFilter`・`MaxItems` が無いこと。`GetPolicyVersion` の `PolicyArn` がポリシーの `Arn`、`VersionId` が `DefaultVersionId` であること
 - **`Document`**: HTTP の応答のモック(XML)で、URL エンコードされた文書(`%7B%22Version%22...`。日本語などの複数バイトの文字と `+` を含める)を返し、デコードしてパースしたオブジェクトが入ること(SDK が自動でデコードしないことの確認を兼ねる)。デコードの関数の表のテスト(`%` の後に 16 進数が無い、`%zz`、UTF-8 でない、JSON でない場合に元の文字列のまま、`+` を空白にしない)
 - **失敗の印**: あるポリシーの `GetPolicyVersion` だけが `Throttling`・`AccessDenied`・`NoSuchEntity` のとき、そのポリシーのキーだけが失敗の印になること。`DefaultVersionId` の無い要素で `GetPolicyVersion` を呼ばず(規則の `num_calls()` で確かめる)、`invalid_response` の失敗の印になること
