@@ -20,15 +20,15 @@
 - **API は既定のパラメーターで呼ぶ**。結果を絞り込む・広げるオプション(`Filters`、`Scope`、`includeShadowTrails` など)を付けない。次のものは「オプション」に含めない
   - ページングのためのパラメーター: 続きを取るトークン(`NextToken`、`Marker`、`ContinuationToken` など)と、ページングの形で呼ぶためのページの大きさ(`ListBuckets` の `MaxBuckets` など)。どちらも返るリソースの集合を変えない
   - 必須の識別子: リソースごとの操作で対象を指すもの(`GetBucketPolicy` の `Bucket`、`GetPolicyVersion` の `PolicyArn` と `VersionId`、`GetTrailStatus` の `Name` など)
-- **返った結果は、絞り込まず・置き換えずにすべて入れる**
-- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バイナリ(Blob)の base64 の文字列への変換と、テキストの形式が定められた Blob の構造化、ポリシー文書の URL デコードと JSON のパース(下の「項目名と値の規則」)。ページングの項目と応答のメタデータを含めないことは、下の「格納の形」のとおり
+- **返った結果は、絞り込まず・置き換えずにすべて入れる**。リソースを列挙する操作の出力の最上位の項目のうち、要素すべてに当てはまるもの(`ListBuckets` の `Owner` など)や要求の値の写し(`ListBuckets` の `Prefix`)も、各リソースに入れる(下の「列挙の操作の値」)
+- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バイナリ(Blob)の base64 の文字列への変換と、テキストの形式が定められた Blob の構造化、ポリシー文書の URL デコードと JSON のパース(下の「項目名と値の規則」)。ページングの項目と応答のメタデータを含めないことと、列挙の操作の出力の要素の配列をリソースごとに分けることは、下の「格納の形」のとおり
 - **秘密の値も伏せない**。ただし、秘密の値の取得そのものが目的の API(読み取り専用ガードの拒否リストの操作)は呼ばない(下の「秘密の値の扱い」)
 - **あるリソースと 1 対 1 で対応する情報は、呼び出す API が分かれていても 1 つのリソースにまとめる**
   - リソースごとに呼ぶ取得の操作(`GetBucketPolicy`、`GetTrailStatus` など)の出力を、操作のキーで一覧の操作と同じリソースに入れる形(下の「格納の形」)は、この原則の一つである
   - アカウントに 1 つの操作の出力でも、その中の要素がリソースと 1 対 1 で対応するなら、要素ごとに対応するリソースに入れる。例: IAM の認証情報レポート(`GetCredentialReport`)の各行を、その行のユーザーの `aws.iam.user` に入れる(下の「格納の形」)。これは絞り込みではなく、この原則による対応づけで、行の内容は変えずに入れる
 - **まとめる対象は、あるリソースに付随する情報に限る**。アカウント(`aws.account.account`)は、この原則でいう「あるリソース」に含めない。アカウントに 1 つだけの設定(IAM のアカウントの概要、パスワードポリシー、S3 のアカウントのパブリックアクセスブロックなど)は、`aws.account.account` にまとめず、それぞれ別の種別にする
   - 理由: サービスの異なる設定を 1 つの種別にまとめると、ある設定の収集の失敗がその種別を使うすべてのルールに波及し([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の「状態の判定順」)、関係の無い判定まで `incomplete` になる。また、1 つのコレクターがサービスをまたぎ、1 リソース種別 1 ファイルの構成と、サービスごとの並行の作業が崩れる
-  - リソースと 1 対多で対応する情報(EC2 の `DescribeInstances` の予約とインスタンスなど)は、この原則の対象ではない。扱いはその種別の機能設計書で決める
+  - リソースと 1 対多で対応する情報は、この原則の対象ではない。ただし、列挙の操作の出力で、リソースの要素を包む上位の要素の項目(EC2 の `DescribeInstances` の予約の `ReservationId`、`OwnerId` など)は、下の「列挙の操作の値」の入れ子の配列の形で、その中の各リソースに入る。それ以外の 1 対多の情報の扱いは、その種別の機能設計書で決める
 - **例外**: 「すべて入れる」に対する例外は、次のものだけとする
   - `aws.account.account` には `GetCallerIdentity` の `Account` だけを入れる(下の「アカウントのリソース」)
   - 認証情報レポートのルートユーザーの行(`<root_account>`)は、対応するリソースが無いため、入れ先が決まるまでどのリソースにも入れない(入れ先が決まるまでの暫定の不足。[最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の未決事項「認証情報レポートのルートユーザーの行」)
@@ -142,11 +142,13 @@ AWS が ARN を定義していない種別にだけ使います。
 ### 格納の形
 
 - キーは、値を取得した AWS API の操作名(PascalCase。例: `ListBuckets`、`GetPublicAccessBlock`)
-- 値は、その操作の出力のうち、そのリソースに当たる部分
-  - 一覧・説明の操作(`ListBuckets`、`DescribeInstances` など)では、出力の配列の中のそのリソースの要素
-  - リソースごとの取得の操作(`GetPublicAccessBlock`、`GetBucketPolicy` など)では、出力全体
+- 値は、その操作の出力のうち、そのリソースに当たる部分。操作の役割で次のように分ける
+  - リソースを列挙する操作(その種別のリソースを返す一覧・説明の操作。`ListBuckets`、`ListUsers`、`DescribeInstances` など)では、出力の形を保ったまま、リソースの要素の配列(`ListBuckets` の `Buckets` など)を、そのリソースの要素 1 つだけの配列にしたもの(下の「列挙の操作の値」)
+  - 1 つのリソースの情報を取る操作では、出力全体(ページのある操作は、下の「全ページをつないだ出力」)。次の 2 つがこれに当たる。一覧の操作(`List*`、`Describe*`)でも、列挙の操作でなければ、要素 1 つの配列にする形にはしない
+    - リソースごとに呼ぶ操作: 必須の識別子でリソースを指して呼ぶもの(`GetPublicAccessBlock`、`GetBucketPolicy`、`ListAttachedUserPolicies` など)
+    - アカウント・リージョンに 1 件のリソースを作る操作: 識別子を取らずに呼び、その出力全体で 1 件のリソースを作るもの(`GetAccountPasswordPolicy`、`GetEbsEncryptionByDefault`、空の一覧でも 1 件を作る IAM Access Analyzer の `ListAnalyzers` など。上の「リソース種別」)
   - アカウントに 1 つの操作で、出力の中の要素がリソースと 1 対 1 で対応するもの(上の「コレクターの方針」)では、そのリソースに対応する要素。要素の取り出し方と値の形は、その種別の機能設計書で決める
-  - どれも、ページングの項目(`NextToken`、`Marker` など)と応答のメタデータは含めない
+  - どれも、ページングの項目と応答のメタデータは含めない(下の「ページングの項目と応答のメタデータ」)
 - API は既定のパラメーターで呼び、返った結果を絞り込まずに入れる(上の「コレクターの方針」)
 - 例: IAM の認証情報レポート(`GetCredentialReport`)
   - レポートはアカウントに 1 つで、`Content` は CSV のテキストの Blob。各行が 1 人の IAM ユーザー(またはルートユーザー)に対応する
@@ -160,8 +162,18 @@ AWS が ARN を定義していない種別にだけ使います。
 ```json
 {
   "ListBuckets": {
-    "Name": "example-bucket",
-    "CreationDate": "2026-01-01T00:00:00Z"
+    "Buckets": [
+      {
+        "Name": "example-bucket",
+        "CreationDate": "2026-01-01T00:00:00Z",
+        "BucketRegion": "us-east-1"
+      }
+    ],
+    "Owner": {
+      "DisplayName": null,
+      "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "Prefix": null
   },
   "GetPublicAccessBlock": {
     "PublicAccessBlockConfiguration": {
@@ -175,6 +187,53 @@ AWS が ARN を定義していない種別にだけ使います。
 }
 ```
 
+(値はすべてダミーです。構成情報は一部の項目だけを示しています。各種別の項目の一覧は、そのコレクターの機能設計書に書きます。)
+
+### 列挙の操作の値
+
+リソースを列挙する操作の値は、出力の形を保ち、リソースの要素の配列を、そのリソースの要素 1 つだけにしたものです。決定の理由と検討した選択肢は [ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md) にあります。
+
+図: [列挙の操作の値の切り分け](../diagrams/Diagram-0039-Listing-Output-Slicing.md)
+
+- 出力の最上位の項目は、ページングの項目と応答のメタデータを除いて、すべて入れる。要素すべてに当てはまる項目(`ListBuckets` の `Owner`。「一覧にしたバケットの所有者」)も、要求の値の写し(`ListBuckets` の `Prefix`。要求で `Prefix` を指定したときに返る)も入れる
+- 最上位の項目が要素の配列だけの操作も、同じ形にする。操作によって値の形を変えない
+  - 例: `ListBuckets` の出力の項目は `Buckets`、`Owner`、`ContinuationToken`、`Prefix`。値は `{"Buckets": [<そのバケットの要素>], "Owner": {...}, "Prefix": ...}`(`ContinuationToken` はページングの項目なので入れない)
+  - 例: `ListUsers` の出力の項目は `Users`、`IsTruncated`、`Marker`。値は `{"Users": [<そのユーザーの要素>]}`
+  - 例: `DescribeSecurityGroups` の出力の項目は `SecurityGroups`、`NextToken`。値は `{"SecurityGroups": [<そのセキュリティグループの要素>]}`
+- 要素の配列は、そのリソースの要素だけを持つ長さ 1 の配列にする。要素の中の項目は変えない(値の変換は下の「項目名と値の規則」)。配列をリソースごとに分けるのは、上の「コレクターの方針」のリソースへの対応づけで、件数を変える絞り込みではない。どの要素も、どれか 1 つのリソースに入る
+- ページ: 列挙の操作では、全ページをつないだ 1 つの出力を作らない。各リソースの値は、その要素を返したページの出力から作る
+  - 最上位の項目の値は、そのページの値にする。ページによって値が違っても、ページごとの値のまま入れる(最初のページの値にそろえる、まとめる、などはしない)
+  - 入れる項目の集合は、SDK の出力の型の最上位の項目(ページングの項目を除く)で決まり、ページによって変えない。そのページが返さなかった項目は `null` にする(下の「項目名と値の規則」の「API が値を返さなかった項目は `null`」)。例: `Prefix` を指定せずに呼んだ `ListBuckets` の `Prefix` は `null`
+- 入れ子の配列: リソースの要素が出力の入れ子の配列の中にある操作では、最上位からそのリソースの要素までの経路にある配列のすべてを、経路の上の要素 1 つだけの配列にする。経路の上の要素のほかの項目はそのまま入れ、経路に無い配列は変えない
+  - 例: EC2 の `DescribeInstances`(出力は `Reservations[]` と `NextToken`。インスタンスは各予約の `Instances[]` の中)のインスタンスの値は `{"Reservations": [{"ReservationId": ..., "OwnerId": ..., "RequesterId": ..., "Groups": [...], "Instances": [<そのインスタンスの要素>]}]}`。予約の項目は、その予約のどのインスタンスの値にも入る
+- 1 つの出力に、別々の要素の配列が複数ある操作(例: IAM の `GetAccountAuthorizationDetails` の `UserDetailList`、`GroupDetailList`、`RoleDetailList`、`Policies`)は、この形のまま当てはめると、ほかの配列の要素をすべて各リソースに写すことになる。こうした操作をリソースの列挙に使う場合の値の形は、未決事項とする
+- 列挙の操作が失敗すると組全体の失敗になる(下の「操作ごとの取得の失敗」)ため、列挙の操作のキーの値が `null` や失敗の印になることは無い
+- Rego からは、要素の配列の添字 `0` で参照する(要素はいつも 1 つ)。例: `input.configuration.ListBuckets.Buckets[0].BucketRegion`、`input.configuration.ListBuckets.Owner.ID`、`input.configuration.DescribeInstances.Reservations[0].Instances[0].MetadataOptions.HttpTokens`。`reason.path` の JSON Pointer も添字を含む(例: `/configuration/ListBuckets/Buckets/0/BucketRegion`)
+
+### 全ページをつないだ出力
+
+1 つのリソースの情報を取る操作(上の「格納の形」)にページがある場合は、全ページを次の規則で 1 つの出力にまとめ、その操作の値にします。列挙の操作には使いません(上の「列挙の操作の値」)。
+
+- 配列の最上位の項目(`ListAttachedUserPolicies` の `AttachedPolicies` など)は、項目ごとに、各ページの要素をページの順につないだ 1 つの配列にする。配列の項目が複数ある出力でも、項目ごとに別々につなぐ。どのページもその項目を返さなければ `null`、1 ページでも返せば、返したページの要素をつないだ配列にする(返らなかったものを空の配列にしない)
+- 配列でない最上位の項目(ページングの項目を除く)は、どのページでも同じ値であることを前提にする
+  - 値を返したページの値がすべて同じなら、その値を入れる。返さなかったページは比べない。どのページも返さなければ `null`
+  - 返したページの間で値が違えば、その操作の応答を不正(`invalid_response`)とし、どれか 1 つのページの値を選ばない。扱いは、その操作が失敗した場合と同じ(下の「操作ごとの取得の失敗」)
+  - 理由: 1 つのリソースの値は 1 つなので、ページごとの値を残す場所が無い。最初・最後のページの値を選ぶと、ほかのページの値を黙って置き換えることになる。ページングの項目を除けば、こうした項目はページの分け方で変わらない情報(要求の値の写し、そのリソースの属性など)のはずで、違うのは通常起こらない応答である
+- 途中のページの取得が失敗した場合は、それまでのページを使わず、その操作全体の失敗として扱う(一部のページだけを入れない)
+
+### ページングの項目と応答のメタデータ
+
+どの役割の操作の値にも、次のものは入れません。
+
+- ページングの項目: 出力の最上位の、次のもの。どれもページの分け方を表すだけで、リソースの情報ではなく、ページの分け方によって値が変わる
+  - 続きを取るためのトークン(`NextToken`、`Marker`、`NextMarker`、`ContinuationToken` など。SDK のページネーターが次の要求に使う項目)
+  - 続きがあるかを示す項目(`IsTruncated` など)
+  - ページの大きさの要求パラメーターの写し(`MaxItems`、`MaxKeys`、`MaxBuckets`、`MaxResults` など)。ページの大きさは、コレクターがページングのために決める値で(上の「コレクターの方針」)、リソースの集合を変えない
+  - そのページの件数(S3 の `ListObjectsV2` の `KeyCount` など)。ページの分け方だけで値が変わるため
+  - これら以外の最上位の項目は、要求の値の写し(`Prefix` など)も含めて入れる
+  - どの項目をページングの項目とするかは、各コレクターの機能設計書で操作ごとに挙げる
+- 応答のメタデータ: API の出力の項目(サービスのモデルの出力のメンバー)ではなく、応答に付く情報(要求 ID、HTTP のステータスなど)
+
 ### 操作ごとの取得の失敗
 
 1 つのリソースの付随情報を取る操作(例: バケットごとの `GetBucketPolicy`)が、1 つのリソースでだけ拒否されることがあります。そのたびに組(アカウント × リージョン × 種別)全体を失敗にすると、ほかのリソースまで評価できなくなるため、次のように分けます。
@@ -182,13 +241,18 @@ AWS が ARN を定義していない種別にだけ使います。
 | 失敗した操作 | 扱い |
 | --- | --- |
 | リソースを列挙する操作(`ListBuckets`、`DescribeSecurityGroups` など) | 組全体の失敗。`ResourceSet` を作らず `CollectionError` を記録する |
+| アカウント・リージョンに 1 件のリソースを作る操作(`GetAccountPasswordPolicy`、`ListAnalyzers` など)で、「設定が存在しない」以外のエラー | 組全体の失敗。`ResourceSet` を作らず `CollectionError` を記録する。「設定が存在しない」エラーでは、その操作のキーを `null` にしたリソースを 1 件作る(上の「リソース種別」) |
 | リソースごとの付随情報を取る操作(`GetBucketPolicy` など)で、「設定が存在しない」以外のエラー | そのリソースのその操作のキーに、失敗の印を置く。リソースと組の収集は成功として扱う |
 
 失敗の印の形です。
 
 ```json
 {
-  "ListBuckets": { "Name": "example-bucket", "CreationDate": "2026-01-01T00:00:00Z" },
+  "ListBuckets": {
+    "Buckets": [ { "Name": "example-bucket", "CreationDate": "2026-01-01T00:00:00Z", "BucketRegion": "us-east-1" } ],
+    "Owner": { "DisplayName": null, "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" },
+    "Prefix": null
+  },
   "GetBucketPolicy": {
     "yata_error": {
       "kind": "access_denied",
@@ -279,15 +343,19 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
       "tags": {},
       "configuration": {
         "DescribeSecurityGroups": {
-          "GroupId": "sg-0123456789abcdef0",
-          "GroupName": "example-sg",
-          "VpcId": "vpc-0123456789abcdef0",
-          "IpPermissions": [
+          "SecurityGroups": [
             {
-              "IpProtocol": "tcp",
-              "FromPort": 22,
-              "ToPort": 22,
-              "IpRanges": [ { "CidrIp": "0.0.0.0/0" } ]
+              "GroupId": "sg-0123456789abcdef0",
+              "GroupName": "example-sg",
+              "VpcId": "vpc-0123456789abcdef0",
+              "IpPermissions": [
+                {
+                  "IpProtocol": "tcp",
+                  "FromPort": 22,
+                  "ToPort": 22,
+                  "IpRanges": [ { "CidrIp": "0.0.0.0/0" } ]
+                }
+              ]
             }
           ]
         }
@@ -303,7 +371,7 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 - 収集に失敗した組には `ResourceSet` を作らず、`CollectionError` を記録する
 - グローバルなリソース種別(IAM など)は `region` を `global` にした 1 つの `ResourceSet` にする
 - 配列の順序は `id` の昇順にそろえ、出力を再現できるようにする
-- S3 のバケット(`aws.s3.bucket`)は `global` の種別とし、`region` が `global` の `ResourceSet` 1 つに全バケットを入れる。各リソースの `region` にはバケットのリージョン(`ListBuckets` の `BucketRegion`)を入れる。理由は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「S3 のバケット」
+- S3 のバケット(`aws.s3.bucket`)は `global` の種別とし、`region` が `global` の `ResourceSet` 1 つに全バケットを入れる。各リソースの `region` にはバケットのリージョン(`ListBuckets` の `Buckets` の要素の `BucketRegion`)を入れる。理由は [最初のルール群の範囲](../features/Feature-0005-Initial-Rule-Set-Scope.ja.md) の「S3 のバケット」
 - 同じ `id` が複数のリージョンの `ResourceSet` に現れることがある(上の「id の一意性」)
 
 ### Inventory
@@ -528,6 +596,11 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 
 - ARN の形式と、サービスごとの形式の調べ方: <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html>
 - EC2 のリソースの ARN の形式(Service Authorization Reference): <https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonec2.html>
+- S3 の `ListBuckets`(出力の項目 `Buckets`、`Owner`、`ContinuationToken`、`Prefix`): <https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html>
+- IAM の `ListUsers`(出力の項目 `Users`、`IsTruncated`、`Marker`): <https://docs.aws.amazon.com/IAM/latest/APIReference/API_ListUsers.html>
+- EC2 の `DescribeSecurityGroups`(出力の項目 `SecurityGroups`、`NextToken`): <https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeSecurityGroups.html>
+- EC2 の `DescribeInstances`(出力の項目 `Reservations`、`NextToken`)と予約の項目: <https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeInstances.html>、<https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_Reservation.html>
+- IAM の `GetAccountAuthorizationDetails`(複数の要素の配列を返す): <https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetAccountAuthorizationDetails.html>
 - CloudTrail の `DescribeTrails`(shadow trail が同じ ARN で返る): <https://docs.aws.amazon.com/awscloudtrail/latest/APIReference/API_DescribeTrails.html>
 - CloudWatch Logs の `DescribeMetricFilters`(項目名が camelCase): <https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_DescribeMetricFilters.html>
 - IAM の認証情報レポート(CSV の列): <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_getting-report.html>、`GetCredentialReport`(`Content` が Blob): <https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetCredentialReport.html>
@@ -545,5 +618,6 @@ SDK の応答をすべて入れると、機微な値(SNS の購読の `Endpoint`
 | スナップショットの Windows のアクセス権 | Windows で、作成者だけが読めるアクセス権(ACL)を設定するか。設定する場合は依存クレートの追加が要る可能性がある | スナップショットを実装する Issue |
 | スナップショットの上限の値 | ファイルの大きさ・ファイル数の上限 | スナップショットを実装する Issue |
 | 変換の補助 | SDK の型から構成情報への変換を補助するマクロ・ヘルパーの形 | 最初のコレクターを実装する Issue |
+| 複数の要素の配列を返す操作での列挙 | 1 つの出力に別々の要素の配列が複数ある操作(`GetAccountAuthorizationDetails` など)をリソースの列挙に使う場合、ほかの配列を各リソースの値に入れるか(「列挙の操作の値」) | そうした操作を使うコレクターを設計する Issue |
 | Blob の base64 の変換に使うクレート | [初期依存クレート](Architecture-Initial-Dependencies.ja.md) の未決事項を参照 | Blob の項目を base64 で入れる最初のコレクターを実装する Issue |
 | スナップショットの注意の文言 | `yata collect` の注意に「構成情報は伏せずに入っているため、機微な値を含みうる」を加えたが、[CLI インターフェース](Architecture-CLI-Interface.ja.md) の「スナップショット」の注意の文にはまだ無い。CLI インターフェースのページを、このページの文言に合わせる | CLI インターフェースを更新する Issue(`yata permissions` の出力の示し方を決める Issue) |
