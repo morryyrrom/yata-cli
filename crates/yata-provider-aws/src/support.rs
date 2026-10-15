@@ -2,6 +2,7 @@
 
 pub(crate) mod clients;
 pub(crate) mod convert;
+pub(crate) mod csv;
 pub(crate) mod errors;
 pub(crate) mod fan_out;
 #[cfg(test)]
