@@ -71,7 +71,7 @@
 
 図: [コントロールとリソース種別の対応](../diagrams/Diagram-0005-CIS-Controls-Resource-Mapping.md)
 
-番号・題名は v7.0.0 のもの(上の「コントロールの番号と題名の確かさ」)。「判定に使う操作」は、構成情報のうち判定に主に使う操作のキーです。リソース種別ごとの操作と権限の全体は、下の「リソース種別ごとの操作と IAM 権限」の表にあります。コントロールに必要な IAM 権限は、`target_type` と `related_types` の種別の権限の和です。
+番号・題名は v7.0.0 のもの(上の「コントロールの番号と題名の確かさ」)。「判定に使う操作」は、構成情報のうち判定に主に使う操作のキーです。括弧の中は、その操作の値の中の項目の経路です。リソースを列挙する操作(`DescribeTrails`、`DescribeInstances` など)の値は出力の形を保ち、要素の配列をそのリソースの要素 1 つだけにしたものなので、経路は添字 `[0]` を含みます([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「列挙の操作の値」)。リソース種別ごとの操作と権限の全体は、下の「リソース種別ごとの操作と IAM 権限」の表にあります。コントロールに必要な IAM 権限は、`target_type` と `related_types` の種別の権限の和です。
 
 | 番号 | 題名 | Lv | `target_type` | `related_types` | 判定に使う操作 |
 | --- | --- | --- | --- | --- | --- |
@@ -87,9 +87,9 @@
 | 3.1.1 | Ensure S3 Bucket Policy is set to deny HTTP requests | L2 | `aws.s3.bucket` | なし | `GetBucketPolicy` |
 | 3.1.4 | Ensure that S3 is configured with 'Block Public Access' enabled | L1 | `aws.s3.bucket` | `aws.s3control.account_public_access_block` | `GetPublicAccessBlock`(バケット・アカウントの両方) |
 | 4.1 | Ensure CloudTrail is enabled in all regions | L1 | `aws.account.account` | `aws.cloudtrail.trail` | `DescribeTrails`、`GetTrailStatus`、`GetEventSelectors` |
-| 4.2 | Ensure CloudTrail log file validation is enabled | L2 | `aws.cloudtrail.trail` | なし | `DescribeTrails`(`LogFileValidationEnabled`) |
-| 4.4 | Ensure that server access logging is enabled on the CloudTrail S3 bucket | L1 | `aws.cloudtrail.trail` | `aws.s3.bucket` | `DescribeTrails`(`S3BucketName`)、バケットの `GetBucketLogging` |
-| 4.5 | Ensure CloudTrail logs are encrypted at rest using KMS CMKs | L2 | `aws.cloudtrail.trail` | なし | `DescribeTrails`(`KmsKeyId`) |
+| 4.2 | Ensure CloudTrail log file validation is enabled | L2 | `aws.cloudtrail.trail` | なし | `DescribeTrails`(`trailList[0].LogFileValidationEnabled`) |
+| 4.4 | Ensure that server access logging is enabled on the CloudTrail S3 bucket | L1 | `aws.cloudtrail.trail` | `aws.s3.bucket` | `DescribeTrails`(`trailList[0].S3BucketName`)、バケットの `GetBucketLogging` |
+| 4.5 | Ensure CloudTrail logs are encrypted at rest using KMS CMKs | L2 | `aws.cloudtrail.trail` | なし | `DescribeTrails`(`trailList[0].KmsKeyId`) |
 | 4.7 | Ensure VPC flow logging is enabled in all VPCs | L2 | `aws.ec2.vpc` | `aws.ec2.flow_log` | `DescribeVpcs`、`DescribeFlowLogs` |
 | 5.2 | Ensure management console sign-in without MFA is monitored | L1 | `aws.account.account` | `aws.cloudtrail.trail`、`aws.cloudwatchlogs.metric_filter`、`aws.cloudwatch.metric_alarm`、`aws.sns.topic` | 下の「監視のコントロール」 |
 | 5.3 | Ensure usage of the 'root' account is monitored | L1 | `aws.account.account` | 5.2 と同じ | 下の「監視のコントロール」 |
@@ -98,7 +98,7 @@
 | 6.3 | Ensure no security groups allow ingress from 0.0.0.0/0 to remote server administration ports | L1 | `aws.ec2.security_group` | なし | `DescribeSecurityGroups` |
 | 6.4 | Ensure no security groups allow ingress from ::/0 to remote server administration ports | L1 | `aws.ec2.security_group` | なし | `DescribeSecurityGroups` |
 | 6.5 | Ensure the default security group of every VPC restricts all traffic | L2 | `aws.ec2.security_group` | なし | `DescribeSecurityGroups` |
-| 6.7 | Ensure that the EC2 Metadata Service only allows IMDSv2 | L1 | `aws.ec2.instance` | なし | `DescribeInstances`(`MetadataOptions.HttpTokens`) |
+| 6.7 | Ensure that the EC2 Metadata Service only allows IMDSv2 | L1 | `aws.ec2.instance` | なし | `DescribeInstances`(`Reservations[0].Instances[0].MetadataOptions.HttpTokens`) |
 
 内訳: IAM 9 件、S3 2 件、CloudTrail・ログ 5 件、監視 2 件、EC2/VPC 6 件(L1 19 件、L2 5 件)。
 
@@ -190,7 +190,7 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
   - 必須の識別子: リソースごとの操作で対象を指すもの(`GetBucketPolicy` の `Bucket`、`GetPolicyVersion` の `PolicyArn` と `VersionId`、`GetTrailStatus` の `Name` など)
 - **返った結果は、絞り込まず・置き換えずにすべて入れる**
   - 「すべて入れる」の対象は、リソースの情報を取る操作(リソースを列挙する操作と、リソースごとの付随情報を取る操作)の出力である。別の操作の前提として呼ぶ手順の操作の出力は、リソースの情報ではないため対象外で、構成情報のキーにしない。これは「すべて入れる」の例外ではない。この範囲では、認証情報レポートの生成を待つために呼ぶ `GenerateCredentialReport` の出力(`Description`、`State`)がこれに当たる([IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「`GenerateCredentialReport` の出力を入れない理由」)
-- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バイナリ(Blob)の base64 の文字列への変換と、テキストの形式が文書化された Blob の構造化(その種別の機能設計書で決めた場合。[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」)、ポリシー文書の URL デコードと JSON のパース。ページングの項目と応答のメタデータを含めないことは、全体設計の「格納の形」のとおり
+- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バイナリ(Blob)の base64 の文字列への変換と、テキストの形式が文書化された Blob の構造化(その種別の機能設計書で決めた場合。[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」)、ポリシー文書の URL デコードと JSON のパース。ページングの項目と応答のメタデータを含めないことと、列挙の操作の出力の要素の配列をリソースごとに分けることは、全体設計の「格納の形」「列挙の操作の値」のとおり
 - **秘密の値も伏せない**(`"<redacted>"` への置き換えは行わない)。ただし、秘密の値の取得そのものが目的の API(読み取り専用ガードの拒否リストの操作。[AWS アクセス](../architecture/Architecture-AWS-Access.ja.md))は呼ばない
   - 応答に含まれる値は、スナップショット、Rego の `input` / `data`、ルールが `actual` に入れた場合はレポートに、そのまま入る。スナップショットを外部に出さないこと(`yata collect` の注意)と、レポートを外部に出すときの `--omit-values` で扱う
   - ルールの作者は、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない
@@ -199,7 +199,7 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
   - アカウントに 1 つの操作の出力でも、その中の要素がリソースと 1 対 1 で対応するなら、要素ごとに対応するリソースに入れる。この範囲では、認証情報レポート(`GetCredentialReport`)の各行がこれに当たり、IAM ユーザーとそのユーザーの行は 1 対 1 なので、行を `aws.iam.user` の各リソースに入れる(下の「認証情報レポート」)。これは「絞り込み」ではなく、この原則による対応づけで、行の内容は変えずに入れる。ただし、対応するリソースの無いルートユーザーの行は、下の「例外」のとおり、この範囲では入れない
 - **まとめる対象は、あるリソースに付随する情報に限る**。アカウント(`aws.account.account`)は、この原則でいう「あるリソース」に含めない。アカウントに 1 つだけの設定(`aws.iam.account_summary`、`aws.iam.password_policy`、`aws.s3control.account_public_access_block` など)は、`aws.account.account` にはまとめず、それぞれ別の種別にする
   - 理由: サービスの異なる設定を 1 つの種別にまとめると、ある設定の収集の失敗がその種別を使うすべてのルールに波及し(「振る舞い」のエラー時)、関係の無い判定まで `incomplete` になる。また、1 つのコレクターがサービスをまたぎ、1 リソース種別 1 ファイルの構成と、サービスごとに分けた後続の Issue の並行の作業が崩れる
-  - リソースと 1 対多で対応する情報(`DescribeInstances` の予約とインスタンスなど)は、この原則の対象ではない。`DescribeInstances` の予約の項目の扱いは未決事項にする
+  - リソースと 1 対多で対応する情報(`DescribeInstances` の予約とインスタンスなど)は、この原則の対象ではない。ただし、列挙の操作の出力で、リソースの要素を包む上位の要素の項目(`DescribeInstances` の予約の `ReservationId`、`OwnerId` など)は、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「列挙の操作の値」の入れ子の配列の形で、その中の各リソースに入る([ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md))
 - **例外**: 「すべて入れる」に対する例外は、この範囲では次のものだけとする
   - `aws.account.account` には `GetCallerIdentity` の `Account` だけを入れ、`Arn`・`UserId` は入れない(全体設計の「SDK の応答をすべて入れる方針の例外」のとおり)。理由: `aws.account.account` はコレクターの収集で作るものではなく、`yata-provider-aws` がアカウントを識別するために作るものだから。全体設計の理由(ルールの判定に使わず、実行した人の情報を残さない)も引き継ぐ
   - 認証情報レポートのルートユーザーの行(`<root_account>`)は、入れ先を決めるまで、この範囲ではどのリソースにも入れない。入れ先が決まるまでの暫定の不足である(下の「認証情報レポート」、未決事項「認証情報レポートのルートユーザーの行」)
@@ -273,8 +273,8 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 
 **`aws.ec2.instance`**
 
-- `DescribeInstances` の値は、`Reservations[].Instances[]` の各要素(インスタンス 1 件)。`UserData` は `DescribeInstances` の応答に含まれず、取得もしない
-- `DescribeInstances` の値の形は、未決事項「`DescribeInstances` の予約の項目」で決める。インスタンスの要素だけを入れると、予約(`Reservations[]` の要素)の `Instances` 以外の項目(`ReservationId`、`OwnerId`、`RequesterId`、`Groups`)が失われ、「すべて入れる」方針と食い違うため。予約とインスタンスは 1 対多で、「コレクターの方針」の 1 対 1 の情報をまとめる原則では決まらない。6.7 の判定に使う `MetadataOptions.HttpTokens` は、どの形でもインスタンスの要素の中にある
+- `DescribeInstances` の値は、出力の形を保ち、経路にある配列(`Reservations` と、その予約の `Instances`)を、そのインスタンスとその予約の要素 1 つだけの配列にしたもの: `{"Reservations": [{"ReservationId": ..., "OwnerId": ..., "RequesterId": ..., "Groups": [...], "Instances": [<そのインスタンスの要素>]}]}`([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「列挙の操作の値」の入れ子の配列、[ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md))。予約の項目は、その予約のどのインスタンスの値にも入る。ページングの項目(`NextToken`)は入れない。`UserData` は `DescribeInstances` の応答に含まれず、取得もしない
+- 6.7 の判定には、`Reservations[0].Instances[0].MetadataOptions.HttpTokens` を使う
 
 **`aws.cloudwatch.metric_alarm`**
 
@@ -365,8 +365,8 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 #### ホームリージョンの証跡と shadow trail の見分け
 
 - コレクターは見分けず、どちらも同じ形で入れる
-- ルールは、`configuration.DescribeTrails.HomeRegion` がリソースの `region` と同じならホームリージョンの証跡、違えば shadow trail と見分ける
-- 組織の証跡は `configuration.DescribeTrails.IsOrganizationTrail` が真で、ARN のアカウント ID は組織の証跡を作ったアカウントのもの(メンバーアカウントでも同じ ARN。[組織の証跡](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/creating-trail-organization.html))。ARN のアカウント ID と `data.yata.context.account.id` を比べれば、別のアカウントが管理する証跡かが分かる
+- ルールは、`configuration.DescribeTrails.trailList[0].HomeRegion` がリソースの `region` と同じならホームリージョンの証跡、違えば shadow trail と見分ける(`DescribeTrails` の値は、出力の形を保ち、`trailList` をその証跡の要素 1 つだけの配列にしたもの。[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「列挙の操作の値」)
+- 組織の証跡は `configuration.DescribeTrails.trailList[0].IsOrganizationTrail` が真で、ARN のアカウント ID は組織の証跡を作ったアカウントのもの(メンバーアカウントでも同じ ARN。[組織の証跡](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/creating-trail-organization.html))。ARN のアカウント ID と `data.yata.context.account.id` を比べれば、別のアカウントが管理する証跡かが分かる
 
 #### 同じ ARN の証跡と `id`
 
@@ -394,7 +394,7 @@ shadow trail は、ホームリージョンの証跡の複製ですが、利用�
 | 5.2、5.3 | `aws.account.account` の 1 件 | 連なりの起点にどのコピーを使ってもよい。重複しても結果は 1 件 |
 
 - **案 A(推奨)**: すべてのコピーを同じ条件で判定する。設定はコピーの間で同じなので、ホームリージョンの証跡が `fail` なら、shadow trail も各リージョンで `fail` になる
-  - 各コピーは別のリソースとして評価され、`fail` の結果のリージョンがそのコピーのリージョンになる。shadow trail(`input.configuration.DescribeTrails.HomeRegion` が `input.region` と違う)の `message` には、shadow trail であることを書く(例: `"Shadow trail of <TrailARN> does not ..."`)。ホームリージョンは ARN に含まれるため、`message` に埋め込んでよいリソースの ID の範囲で利用者に分かる
+  - 各コピーは別のリソースとして評価され、`fail` の結果のリージョンがそのコピーのリージョンになる。shadow trail(`input.configuration.DescribeTrails.trailList[0].HomeRegion` が `input.region` と違う)の `message` には、shadow trail であることを書く(例: `"Shadow trail of <TrailARN> does not ..."`)。ホームリージョンは ARN に含まれるため、`message` に埋め込んでよいリソースの ID の範囲で利用者に分かる
   - 組織の証跡で、別のアカウントが管理するものは、`message` にそのことを書く(修正は組織の証跡を管理するアカウントで行う)
   - レポートでは、リソース ID(ARN。ホームリージョンを含む)とリージョンの列が違う行として現れ、table の既定の表示(`fail` だけ)でも shadow trail の存在が分かる
   - ホームリージョンが対象外(`--region`)でも、shadow trail で判定されるため、黙って見逃さない
@@ -566,7 +566,7 @@ crates/yata-provider-aws/src/collectors/
 | 別のアカウントにある証跡の送り先 | 4.4 で証跡のバケットが、5.2・5.3 で証跡のロググループが、別のアカウント(集約用のアカウント、組織の証跡を作ったアカウント)にあり、`data` に無い場合の判定と `message` | ルールの Issue(6c、6d) |
 | 2.14 の対象 | AWS 管理ポリシー(`AdministratorAccess` など)のアタッチを `fail` にするか、カスタマー管理ポリシーだけにするか。アタッチされていないポリシーは、ルールで `AttachmentCount` を見て除く。インラインポリシーを対象にするか(対象にするなら `GetUserPolicy` などの収集を加える) | ルールの Issue(6a) |
 | 方針と食い違う既存の規則 | 解決済み: Blob は base64 の文字列で入れ、テキストの形式が文書化された Blob は機能設計書で決めて構造化してよい([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」、上の「コレクターの方針」)。認証情報レポートの `Content` は例外ではない。`aws.account.account` の構成情報を `GetCallerIdentity` の `Account` だけにする規則は、「コレクターの方針」の例外として残す | 解決済み(後続の Issue 1) |
-| `DescribeInstances` の予約の項目 | `aws.ec2.instance` で、予約(`Reservations[]` の要素)の `ReservationId`、`OwnerId`、`RequesterId`、`Groups` をどう入れるか(インスタンスの要素だけを入れると失われる)。予約とインスタンスは 1 対多で、「コレクターの方針」の 1 対 1 の情報をまとめる原則の対象ではない | 後続の Issue 4f |
+| `DescribeInstances` の予約の項目 | 解決済み: `DescribeInstances` の値は出力の形を保ち、経路にある配列を要素 1 つだけにした `{"Reservations": [{"ReservationId": ..., "OwnerId": ..., "RequesterId": ..., "Groups": [...], "Instances": [<そのインスタンスの要素>]}]}` とし、予約の項目はその予約のどのインスタンスの値にも入る([ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md)、上の「`aws.ec2.instance`」) | 解決済み(ADR-0039) |
 | 認証情報レポートのルートユーザーの行 | レポートの `<root_account>` の行をどの種別のリソースに入れるか(この範囲ではどのリソースにも入れない)。「コレクターの方針」の 1 対 1 の情報をまとめる原則とその範囲(リソースに付随する情報に限り、アカウントの設定は `aws.account.account` にまとめない)に従って入れ先を決める | 2.7 を範囲に加えるとき |
 | 監視のフィルターのパターンの比べ方 | 5.2、5.3 で、メトリクスフィルターのパターンを CIS の例と文字列で比べるか、構成要素で比べるか | ルールの Issue(6d) |
 | 次の段階の範囲 | 区分 C・D のコントロール(AWS Config、KMS、IAM Access Analyzer、RDS、EFS、Account、Security Hub、残りの監視など)をどの順に加えるか | 最初のリリースの後 |

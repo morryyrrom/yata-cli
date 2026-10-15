@@ -21,22 +21,26 @@
         ]
       },
       "ListUsers": {
-        "Arn": "arn:aws:iam::123456789012:user/alice",
-        "CreateDate": "2026-01-01T00:00:00Z",
-        "PasswordLastUsed": "2026-02-01T00:00:00Z",
-        "Path": "/",
-        "PermissionsBoundary": {
-          "PermissionsBoundaryArn": "arn:aws:iam::123456789012:policy/boundary",
-          "PermissionsBoundaryType": "PermissionsBoundaryPolicy"
-        },
-        "Tags": [
+        "Users": [
           {
-            "Key": "team",
-            "Value": "example"
+            "Arn": "arn:aws:iam::123456789012:user/alice",
+            "CreateDate": "2026-01-01T00:00:00Z",
+            "PasswordLastUsed": "2026-02-01T00:00:00Z",
+            "Path": "/",
+            "PermissionsBoundary": {
+              "PermissionsBoundaryArn": "arn:aws:iam::123456789012:policy/boundary",
+              "PermissionsBoundaryType": "PermissionsBoundaryPolicy"
+            },
+            "Tags": [
+              {
+                "Key": "team",
+                "Value": "example"
+              }
+            ],
+            "UserId": "AIDAEXAMPLEALICE",
+            "UserName": "alice"
           }
-        ],
-        "UserId": "AIDAEXAMPLEALICE",
-        "UserName": "alice"
+        ]
       }
     },
     "id": "arn:aws:iam::123456789012:user/alice",
@@ -55,14 +59,18 @@
         "PolicyNames": []
       },
       "ListUsers": {
-        "Arn": "arn:aws:iam::123456789012:user/carol",
-        "CreateDate": "2026-01-01T00:00:00Z",
-        "PasswordLastUsed": null,
-        "Path": "/",
-        "PermissionsBoundary": null,
-        "Tags": null,
-        "UserId": "AIDAEXAMPLECAROL",
-        "UserName": "carol"
+        "Users": [
+          {
+            "Arn": "arn:aws:iam::123456789012:user/carol",
+            "CreateDate": "2026-01-01T00:00:00Z",
+            "PasswordLastUsed": null,
+            "Path": "/",
+            "PermissionsBoundary": null,
+            "Tags": null,
+            "UserId": "AIDAEXAMPLECAROL",
+            "UserName": "carol"
+          }
+        ]
       }
     },
     "id": "arn:aws:iam::123456789012:user/carol",
@@ -81,14 +89,18 @@
         "PolicyNames": []
       },
       "ListUsers": {
-        "Arn": "arn:aws:iam::123456789012:user/team/bob",
-        "CreateDate": "2026-01-01T00:00:00Z",
-        "PasswordLastUsed": null,
-        "Path": "/team/",
-        "PermissionsBoundary": null,
-        "Tags": null,
-        "UserId": "AIDAEXAMPLEBOB",
-        "UserName": "bob"
+        "Users": [
+          {
+            "Arn": "arn:aws:iam::123456789012:user/team/bob",
+            "CreateDate": "2026-01-01T00:00:00Z",
+            "PasswordLastUsed": null,
+            "Path": "/team/",
+            "PermissionsBoundary": null,
+            "Tags": null,
+            "UserId": "AIDAEXAMPLEBOB",
+            "UserName": "bob"
+          }
+        ]
       }
     },
     "id": "arn:aws:iam::123456789012:user/team/bob",

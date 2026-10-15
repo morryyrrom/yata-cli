@@ -19,8 +19,8 @@ sequenceDiagram
             Note over C: Group failure (invalid_response, MissingArn or InvalidDateTime)
         else No page returned Policies
             Note over C: Group failure (invalid_response, MissingPolicies)
-        else Policies of the pages are concatenated in API order
-            Note over C: Pages without Policies add no elements
+        else Each policy is collected from its own page
+            Note over C: Each policy's ListPolicies value is {Policies:[that policy]}, built from its own page without paging fields (IsTruncated, Marker). Resources are created in API order. Pages without Policies add no resources
             loop For each policy, at most 8 GetPolicyVersion calls in flight
                 alt DefaultVersionId is missing
                     Note over C: Call skipped. Failure mark for this policy key (invalid_response, MissingDefaultVersionId)

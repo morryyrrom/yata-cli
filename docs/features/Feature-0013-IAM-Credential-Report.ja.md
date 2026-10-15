@@ -51,7 +51,7 @@
 
 ```json
 {
-  "ListUsers": { "Arn": "arn:aws:iam::123456789012:user/example-user", "UserName": "example-user", "...": "..." },
+  "ListUsers": { "Users": [ { "Arn": "arn:aws:iam::123456789012:user/example-user", "UserName": "example-user", "...": "..." } ] },
   "ListAttachedUserPolicies": { "AttachedPolicies": [] },
   "ListUserPolicies": { "PolicyNames": [] },
   "GetCredentialReport": {
@@ -86,7 +86,7 @@
 }
 ```
 
-(値はすべてダミーです。`ListUsers` の値は一部の項目だけを示しています。)
+(値はすべてダミーです。`ListUsers` の値は、ユーザーの要素の一部の項目だけを示しています。)
 
 - 値は `GetCredentialReport` の出力の 3 項目をすべて持つオブジェクト。`Content` だけを、そのユーザーの行にする([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」)
 - **`GeneratedTime`**: RFC 3339(UTC、`Z`)の文字列。`support/convert.rs` の `datetime_to_rfc3339` で整形する。API が返さなければ `null`。ルールはこれでレポートの古さを判断できる(IAM は 4 時間以内に作ったレポートを使い回すため)

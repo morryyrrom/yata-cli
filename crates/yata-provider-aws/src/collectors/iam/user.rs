@@ -54,15 +54,7 @@ async fn collect(ctx: &CollectContext, region: &str) -> Result<Vec<Resource>, Co
     let client: aws_sdk_iam::Client = ctx.client(region);
 
     // Step 1: all pages of ListUsers. Any failure fails the whole group.
-    let users = list_users(&client).await?;
-    let mut entries: Vec<(String, String, Value)> = Vec::with_capacity(users.len());
-    for user in &users {
-        entries.push((
-            user.arn().to_owned(),
-            user.user_name().to_owned(),
-            user_value(user)?,
-        ));
-    }
+    let entries = list_users(&client).await?;
 
     // Step 2: the per-user calls, concurrently with a bounded number of tasks.
     let names: Vec<String> = entries.iter().map(|(_, name, _)| name.clone()).collect();
@@ -104,19 +96,31 @@ async fn collect(ctx: &CollectContext, region: &str) -> Result<Vec<Resource>, Co
     Ok(resources)
 }
 
+/// One listed user: its ARN, its name, and the `ListUsers` value of its resource.
+type UserEntry = (String, String, Value);
+
 /// Fetches all pages of `ListUsers` in the order the API returned them.
-async fn list_users(client: &aws_sdk_iam::Client) -> Result<Vec<User>, CollectError> {
-    let mut users = Vec::new();
+///
+/// The value of each user keeps the shape of the operation output: an object holding only the
+/// array `Users` with the element of that user (paging fields are not included).
+async fn list_users(client: &aws_sdk_iam::Client) -> Result<Vec<UserEntry>, CollectError> {
+    let mut entries = Vec::new();
     let mut pages = client.list_users().into_paginator().send();
     while let Some(page) = pages.next().await {
         let page = page.map_err(|err| CollectError::from_sdk(LIST_USERS, &err))?;
-        users.extend(page.users);
+        for user in &page.users {
+            entries.push((
+                user.arn().to_owned(),
+                user.user_name().to_owned(),
+                json!({ "Users": [user_element(user)?] }),
+            ));
+        }
     }
-    Ok(users)
+    Ok(entries)
 }
 
-/// Converts an element of `ListUsers` to its configuration value (all eight members).
-fn user_value(user: &User) -> Result<Value, CollectError> {
+/// Converts an element of `ListUsers` to JSON (all eight members).
+fn user_element(user: &User) -> Result<Value, CollectError> {
     let create_date = datetime_to_rfc3339(user.create_date())
         .ok_or_else(|| invalid_datetime(LIST_USERS))?;
     let password_last_used = match user.password_last_used() {
@@ -506,6 +510,21 @@ mod tests {
             &golden_path("iam", "user"),
             &serde_json::to_value(&resources).unwrap(),
         );
+    }
+
+    #[tokio::test]
+    async fn the_listing_value_is_an_object_with_only_the_element_array() {
+        let rules = three_user_rules();
+        let resources = collect(&context(&rules), "us-east-1").await.unwrap();
+        assert_eq!(resources.len(), 3);
+        for (resource, name) in resources.iter().zip(["alice", "bob", "carol"]) {
+            let value = resource.configuration["ListUsers"].as_object().unwrap();
+            assert_eq!(value.keys().collect::<Vec<_>>(), ["Users"]);
+            assert!(!value.contains_key("IsTruncated") && !value.contains_key("Marker"));
+            let users = value["Users"].as_array().unwrap();
+            assert_eq!(users.len(), 1);
+            assert_eq!(users[0]["UserName"], json!(name));
+        }
     }
 
     #[tokio::test]

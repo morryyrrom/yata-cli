@@ -119,7 +119,16 @@
             "name": "example-bucket",
             "tags": {},
             "configuration": {
-              "ListBuckets": { "Name": "example-bucket", "CreationDate": "2026-01-01T00:00:00Z" },
+              "ListBuckets": {
+                "Buckets": [
+                  { "Name": "example-bucket", "CreationDate": "2026-01-01T00:00:00Z", "BucketRegion": "us-east-1" }
+                ],
+                "Owner": {
+                  "DisplayName": null,
+                  "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                },
+                "Prefix": null
+              },
               "GetPublicAccessBlock": {
                 "PublicAccessBlockConfiguration": {
                   "BlockPublicAcls": false,
@@ -244,3 +253,4 @@
 - 「決定」の「配布と読み込み」で未決事項としたポリシーのディレクトリの既定の場所は、設けないことにした。指定は `--policy-dir` → 環境変数 `YATA_POLICY_DIR` の順で、どちらも無ければ終了コード 2 のまま([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「ポリシーのディレクトリの決定」、[CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) の「オプションの優先度」)
 - `yata` はポリシーを取得・更新せず、取得したポリシーの署名・出所も検証しない。取得・更新は利用者がポリシーのリポジトリの配布物で行い、改ざんの確認は利用者が配布元の提供する手段で行う([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「ポリシーのディレクトリの決定」「(a) 信頼の前提」)
 - 「決定」の「ポリシーのリポジトリでの確認」でこの ADR の範囲外としたポリシーのリポジトリの構成・配布・リリースは、機能の設計書で定める([ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md))
+- 「決定」のフィクスチャの例の `ListBuckets` の値は、[ADR: 列挙の操作の値に出力の形を保つ](ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md) の形(出力の形を保ち、`Buckets` をそのバケットの要素 1 つだけの配列にしたもの)で示す
