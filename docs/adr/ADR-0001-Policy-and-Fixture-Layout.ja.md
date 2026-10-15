@@ -238,3 +238,9 @@
 
 - OPA のメタデータ注釈: <https://www.openpolicyagent.org/docs/latest/policy-language/#metadata>
 - JSON Pointer(RFC 6901): <https://www.rfc-editor.org/rfc/rfc6901>
+
+## 追記
+
+- 「決定」の「配布と読み込み」で未決事項としたポリシーのディレクトリの既定の場所は、設けないことにした。指定は `--policy-dir` → 環境変数 `YATA_POLICY_DIR` の順で、どちらも無ければ終了コード 2 のまま([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「ポリシーのディレクトリの決定」、[CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) の「オプションの優先度」)
+- `yata` はポリシーを取得・更新せず、取得したポリシーの署名・出所も検証しない。取得・更新は利用者がポリシーのリポジトリの配布物で行い、改ざんの確認は利用者が配布元の提供する手段で行う([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「ポリシーのディレクトリの決定」「(a) 信頼の前提」)
+- 「決定」の「ポリシーのリポジトリでの確認」でこの ADR の範囲外としたポリシーのリポジトリの構成・配布・リリースは、機能の設計書で定める([ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md))

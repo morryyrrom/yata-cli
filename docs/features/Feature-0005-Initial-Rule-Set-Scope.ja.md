@@ -189,7 +189,8 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
   - ページングのためのパラメーター: 続きを取るトークン(`NextToken`、`Marker`、`ContinuationToken` など)と、ページングの形で呼ぶためのページの大きさ(`ListBuckets` の `MaxBuckets`。下の「S3 のバケット」)。どちらも返るリソースの集合を変えない
   - 必須の識別子: リソースごとの操作で対象を指すもの(`GetBucketPolicy` の `Bucket`、`GetPolicyVersion` の `PolicyArn` と `VersionId`、`GetTrailStatus` の `Name` など)
 - **返った結果は、絞り込まず・置き換えずにすべて入れる**
-- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、ポリシー文書の URL デコードと JSON のパース。ページングの項目と応答のメタデータを含めないことは、全体設計の「格納の形」のとおり
+  - 「すべて入れる」の対象は、リソースの情報を取る操作(リソースを列挙する操作と、リソースごとの付随情報を取る操作)の出力である。別の操作の前提として呼ぶ手順の操作の出力は、リソースの情報ではないため対象外で、構成情報のキーにしない。これは「すべて入れる」の例外ではない。この範囲では、認証情報レポートの生成を待つために呼ぶ `GenerateCredentialReport` の出力(`Description`、`State`)がこれに当たる([IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「`GenerateCredentialReport` の出力を入れない理由」)
+- **許す変換は、値の意味・件数を変えない形式の変換だけ**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バイナリ(Blob)の base64 の文字列への変換と、テキストの形式が文書化された Blob の構造化(その種別の機能設計書で決めた場合。[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」)、ポリシー文書の URL デコードと JSON のパース。ページングの項目と応答のメタデータを含めないことは、全体設計の「格納の形」のとおり
 - **秘密の値も伏せない**(`"<redacted>"` への置き換えは行わない)。ただし、秘密の値の取得そのものが目的の API(読み取り専用ガードの拒否リストの操作。[AWS アクセス](../architecture/Architecture-AWS-Access.ja.md))は呼ばない
   - 応答に含まれる値は、スナップショット、Rego の `input` / `data`、ルールが `actual` に入れた場合はレポートに、そのまま入る。スナップショットを外部に出さないこと(`yata collect` の注意)と、レポートを外部に出すときの `--omit-values` で扱う
   - ルールの作者は、判定に要らない機微な値(SNS の購読の `Endpoint` など)を `actual` や `message` に入れない
@@ -199,10 +200,10 @@ v7.0.0 の L1 / L2 の監査ファイルに載っていた 70 件のうち、上
 - **まとめる対象は、あるリソースに付随する情報に限る**。アカウント(`aws.account.account`)は、この原則でいう「あるリソース」に含めない。アカウントに 1 つだけの設定(`aws.iam.account_summary`、`aws.iam.password_policy`、`aws.s3control.account_public_access_block` など)は、`aws.account.account` にはまとめず、それぞれ別の種別にする
   - 理由: サービスの異なる設定を 1 つの種別にまとめると、ある設定の収集の失敗がその種別を使うすべてのルールに波及し(「振る舞い」のエラー時)、関係の無い判定まで `incomplete` になる。また、1 つのコレクターがサービスをまたぎ、1 リソース種別 1 ファイルの構成と、サービスごとに分けた後続の Issue の並行の作業が崩れる
   - リソースと 1 対多で対応する情報(`DescribeInstances` の予約とインスタンスなど)は、この原則の対象ではない。`DescribeInstances` の予約の項目の扱いは未決事項にする
-- **例外**: 「すべて入れる」に対する例外は、この範囲では次のものだけとする(下のバイナリの規則の扱いは未決事項で、その結論によって例外が増えることがある)
+- **例外**: 「すべて入れる」に対する例外は、この範囲では次のものだけとする
   - `aws.account.account` には `GetCallerIdentity` の `Account` だけを入れ、`Arn`・`UserId` は入れない(全体設計の「SDK の応答をすべて入れる方針の例外」のとおり)。理由: `aws.account.account` はコレクターの収集で作るものではなく、`yata-provider-aws` がアカウントを識別するために作るものだから。全体設計の理由(ルールの判定に使わず、実行した人の情報を残さない)も引き継ぐ
   - 認証情報レポートのルートユーザーの行(`<root_account>`)は、入れ先を決めるまで、この範囲ではどのリソースにも入れない。入れ先が決まるまでの暫定の不足である(下の「認証情報レポート」、未決事項「認証情報レポートのルートユーザーの行」)
-- 全体設計の既存の規則のうち、この方針と食い違うもの(バイナリ(Blob)の項目を入れない)の扱いは未決事項にする
+- **バイナリ(Blob)の項目も入れる**。Blob は標準の base64 の文字列で入れ、AWS のドキュメントでテキストの形式が定められた Blob は、その種別の機能設計書で決めて構造化して入れてよい([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」)。認証情報レポートの `Content` は、この規則で構造化して入れるもので、「すべて入れる」の例外ではない(下の「認証情報レポート」)
 
 ## リソース種別ごとの操作と IAM 権限
 
@@ -412,15 +413,16 @@ shadow trail は、ホームリージョンの証跡の複製ですが、利用�
 - 生成を許可する理由: `GenerateCredentialReport` は、アカウントに 1 つだけあるレポートを作り直す操作で、IAM のユーザー・認証情報・設定を作成・変更・削除しない。CIS の監査の手順もこのレポートを使う
 - 収集の流れ(`aws.iam.user` のコレクターの中で行う)
   1. `ListUsers` でユーザーを列挙する
-  2. `GenerateCredentialReport` を呼ぶ。`State` が `COMPLETE` になるまで、間隔を空けて呼び直す(回数・間隔の上限はコレクターの機能設計書で決める)。IAM は 4 時間以内に作ったレポートがあればそれを使う
+  2. `GenerateCredentialReport` を呼ぶ。`State` が `COMPLETE` になるまで、間隔を空けて呼び直す(間隔と上限は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「レポートの生成を待つ手順」)。IAM は 4 時間以内に作ったレポートがあればそれを使う
   3. `GetCredentialReport` でレポート(CSV)を取り、行ごとに解析する
   4. 行の `arn` がユーザーの ARN と一致する行を、そのユーザーの `GetCredentialReport` のキーに入れる
 - 構成情報の形
-  - `GetCredentialReport` の値は `{"GeneratedTime": "<RFC 3339>", "Content": { <列名>: <値>, ... }}` とする
-  - `Content` は API では CSV のバイナリ(Blob)だが、そのユーザーの行を列名をキーにしたオブジェクトにして入れる。これは現在の全体設計の「バイナリは入れない」規則の例外になる(この規則の扱いは未決事項「方針と食い違う既存の規則」)。また、アカウントに 1 つの操作の出力を行ごとにリソースへ対応づけるため、「リソースごとの取得の操作は出力全体を入れる」の形とも異なる。この扱いを全体設計に加える(下の「全体設計への反映」)。列名は IAM のドキュメントの CSV の列名(`password_enabled`、`mfa_active` など。snake_case)をそのまま使う
+  - `GetCredentialReport` の値は `{"GeneratedTime": "<RFC 3339>", "ReportFormat": "text/csv", "Content": { <列名>: <値>, ... }}` とする。出力の項目はすべて入れ、`Content` だけをそのユーザーの行にする
+  - `Content` は API では CSV のテキストの Blob で、そのユーザーの行を列名をキーにしたオブジェクトにして入れる。これは [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」の、テキストの形式が文書化された Blob を機能設計書で決めて構造化する扱いによるもので、「すべて入れる」の例外ではない。また、アカウントに 1 つの操作の出力を行ごとにリソースへ対応づけるため、「リソースごとの取得の操作は出力全体を入れる」の形とも異なる(リソースモデルの「格納の形」)。列名は IAM のドキュメントの CSV の列名(`password_enabled`、`mfa_active` など。snake_case)をそのまま使う。CSV の解析の規則は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「CSV の解析」
   - 値は CSV の文字列のまま入れる(`"TRUE"`、`"N/A"`、`"no_information"` などを変換しない)。`N/A` などの特別な値を真偽値や `null` に変えると、意味の区別が失われるため
   - `GeneratedTime` を入れ、ルールがレポートの古さを判断できるようにする
 - 生成・取得が失敗した場合(権限不足、時間切れ、`ReportNotPresent` など)は、すべてのユーザーの `GetCredentialReport` のキーに失敗の印を置く。`ListUsers` が成功していれば組の収集は成功として扱い、ルールの状態は `incomplete` になる
+- レポートに行の無いユーザー(4 時間以内に作られたレポートが使い回され、その後に作られたユーザーなど)は、そのユーザーの `GetCredentialReport` のキーに失敗の印を置く(`null` にしない)。2.10〜2.12 は `incomplete` になる。失敗の印の種類とメッセージは [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「失敗の印」
 - ルートユーザーの行(`<root_account>`)は、今回の範囲では使わず、入れ先も今回は決めない(2.4、2.5 は `GetAccountSummary` で判定する)。2.7 を加えるときに、「コレクターの方針」の 1 対 1 の情報をまとめる原則とその範囲に従って入れ先を決める(未決事項「認証情報レポートのルートユーザーの行」)
 - `yata permissions` が出す権限に `iam:GenerateCredentialReport` が入る。AWS 管理ポリシー `SecurityAudit` はこの権限を含む
 
@@ -457,7 +459,7 @@ crates/yata-provider-aws/src/collectors/
 └── ec2/{security_group,network_acl,instance,vpc,flow_log,ebs_encryption_default}.rs
 ```
 
-- 認証情報レポートの生成・取得・CSV の解析は、`collectors/iam/user.rs` に置く。ほかの IAM のコレクターからも使うことになった時点で `support/` に移す
+- 認証情報レポートの生成・取得と行の対応づけは `collectors/iam/user.rs` に、CSV の解析はサービスに依存しない関数として `support/csv.rs` に置く([IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「構成」)
 - 読み取り専用ガードの例外リストへの `IAM` / `GenerateCredentialReport` の追加は、`yata-provider-aws/src/support/` の例外リストに理由とともに書く(単独の PR)
 - 種別ごとの構成情報の詳細(全項目、`null` にするエラー、`id` の形式)は、サービスごとのコレクターの機能設計書(`docs/features/`)に書く
 - ルール本体は、ポリシーのリポジトリに置く。ディレクトリはサービスの単位(`iam/`、`s3/`、`cloudtrail/`、`monitoring/`、`ec2/` など)を想定し、詳細はポリシーのリポジトリで決める
@@ -477,7 +479,7 @@ crates/yata-provider-aws/src/collectors/
 
 ## 全体設計への反映
 
-次の点は `docs/architecture/` の変更が必要です。この設計の PR では変更せず、後続の Issue(下の「後続の Issue」の 1)で単独の PR にします。(この表のうち `fail` の要素の `resource_region` に関する変更は、その後 [ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で廃止しました。)
+次の点は `docs/architecture/` の変更が必要です。この設計の PR では変更せず、後続の Issue(下の「後続の Issue」の 1)で単独の PR にします。(この表のうち `fail` の要素の `resource_region` に関する変更は、その後 [ADR: ルールをリソースごとに評価する](../adr/ADR-0030-Per-Resource-Rule-Evaluation.ja.md) で廃止しました。[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の (3) と (9) の Blob の扱いと認証情報レポートの値の形は、現在は上の「コレクターの方針」と「認証情報レポート」のとおりです。)
 
 | ページ | 変更 |
 | --- | --- |
@@ -557,13 +559,13 @@ crates/yata-provider-aws/src/collectors/
 | 操作の単位でのルールの状態 | 失敗の印の影響が、同じ種別を使うほかのルールにも及ぶ(「振る舞い」のエラー時)。ルールが使う操作をメタデータで宣言し、その操作の失敗だけで `incomplete` にするか。最初のリリースでは許容する | 最初のリリースの後、全体設計の Issue |
 | `yata permissions` での例外の操作の示し方 | 出力は IAM ポリシーの JSON で、注記を書く場所が無い。標準エラー出力に注意を出す、例外の操作を別の文(`Sid` で区別)に分ける、などから選ぶ。CLI の出力を変える場合は [CLI インターフェース](../architecture/Architecture-CLI-Interface.ja.md) を更新する | `yata permissions` を実装する Issue(前提の P5) |
 | 全リージョンの判定と `--region` | `--region` で対象を絞ると、4.1・6.1.1 などの「全リージョン」の判定は対象のリージョンの範囲になり、対象外のリージョンの不備を見逃す。マルチリージョンの証跡は、ホームリージョンが対象外でも shadow trail として収集されるが、ホームリージョンが対象外のシングルリージョンの証跡は収集されない。ロググループのリージョンが対象外だと、5.2・5.3 の連なりをたどれず `fail` になる。アカウントで有効なリージョンの一覧を `data.yata.context` に入れるか、レポートで注意を出すか | ルールの Issue(6c、6d、6e)の前に、全体設計の Issue(前提の P4)として決める |
-| レポートに行の無いユーザー | レポートの生成の後に作られたユーザーなど、行が無い場合に `GetCredentialReport` のキーを `null` にするか失敗の印にするか。黙って `pass` にしないことを優先する | 後続の Issue 4b |
-| 認証情報レポートの待ち方 | `GenerateCredentialReport` を呼び直す回数・間隔の上限(時間切れになった場合は、上の「認証情報レポート」のとおり失敗の印を置く) | 後続の Issue 4b |
+| レポートに行の無いユーザー | 解決済み: 失敗の印にする(`null` にしない)。[IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「行とユーザーの対応づけ」で決めた | 解決済み(後続の Issue 4b) |
+| 認証情報レポートの待ち方 | 解決済み: 呼び直す間隔と上限は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「レポートの生成を待つ手順」で決めた(時間切れになった場合は、上の「認証情報レポート」のとおり失敗の印を置く) | 解決済み(後続の Issue 4b) |
 | shadow trail のイベントセレクターの取得 | `GetEventSelectors` を shadow trail の ARN で(別のリージョンをホームとする証跡、メンバーアカウントからの組織の証跡)呼んで取れるかは、API リファレンスに記述が無い(`GetTrailStatus` は取れることを確かめた)。確かめるには実際の AWS アカウントでの確認が要る。常に特定のエラーになると分かった場合に、そのエラーを失敗の印のままにするか(その場合、ルールの状態は種別の単位で決まるため、shadow trail がある環境では `aws.cloudtrail.trail` を使うすべてのルール(4.1・4.2・4.4・4.5・5.2・5.3)が常に `incomplete` になる)、別の扱いにするか | 後続の Issue 4d |
 | shadow trail の検出の見せ方 | 4.2・4.4・4.5 で、上の「結果の見せ方」の案 A(すべてのコピーを判定し、shadow trail であることを `message` に書く)と案 B(ホームリージョンの証跡だけを判定する)のどちらにするか。推奨は案 A | ルールの Issue(6c) |
 | 別のアカウントにある証跡の送り先 | 4.4 で証跡のバケットが、5.2・5.3 で証跡のロググループが、別のアカウント(集約用のアカウント、組織の証跡を作ったアカウント)にあり、`data` に無い場合の判定と `message` | ルールの Issue(6c、6d) |
 | 2.14 の対象 | AWS 管理ポリシー(`AdministratorAccess` など)のアタッチを `fail` にするか、カスタマー管理ポリシーだけにするか。アタッチされていないポリシーは、ルールで `AttachmentCount` を見て除く。インラインポリシーを対象にするか(対象にするなら `GetUserPolicy` などの収集を加える) | ルールの Issue(6a) |
-| 方針と食い違う既存の規則 | 全体設計のバイナリ(Blob)の項目を入れない規則を、「コレクターの方針」の例外として残すか、方針に合わせて改めるか。`aws.account.account` の構成情報を `GetCallerIdentity` の `Account` だけにする規則は、「コレクターの方針」の例外として残すため、この項目に含めない | 後続の Issue 1 |
+| 方針と食い違う既存の規則 | 解決済み: Blob は base64 の文字列で入れ、テキストの形式が文書化された Blob は機能設計書で決めて構造化してよい([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「項目名と値の規則」、上の「コレクターの方針」)。認証情報レポートの `Content` は例外ではない。`aws.account.account` の構成情報を `GetCallerIdentity` の `Account` だけにする規則は、「コレクターの方針」の例外として残す | 解決済み(後続の Issue 1) |
 | `DescribeInstances` の予約の項目 | `aws.ec2.instance` で、予約(`Reservations[]` の要素)の `ReservationId`、`OwnerId`、`RequesterId`、`Groups` をどう入れるか(インスタンスの要素だけを入れると失われる)。予約とインスタンスは 1 対多で、「コレクターの方針」の 1 対 1 の情報をまとめる原則の対象ではない | 後続の Issue 4f |
 | 認証情報レポートのルートユーザーの行 | レポートの `<root_account>` の行をどの種別のリソースに入れるか(この範囲ではどのリソースにも入れない)。「コレクターの方針」の 1 対 1 の情報をまとめる原則とその範囲(リソースに付随する情報に限り、アカウントの設定は `aws.account.account` にまとめない)に従って入れ先を決める | 2.7 を範囲に加えるとき |
 | 監視のフィルターのパターンの比べ方 | 5.2、5.3 で、メトリクスフィルターのパターンを CIS の例と文字列で比べるか、構成要素で比べるか | ルールの Issue(6d) |

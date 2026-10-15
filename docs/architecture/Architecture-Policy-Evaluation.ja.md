@@ -240,9 +240,9 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 
 ### ポリシーのディレクトリの決定
 
-`--policy-dir <DIR>`(複数指定可)→ 環境変数 `YATA_POLICY_DIR`(OS のパスの区切り文字で複数指定可)→ 既定の場所、の順に決めます。オプションと環境変数の両方があれば、オプションだけを使います(混ぜない)。既定の場所は未決事項で、決まるまでは「既定なし」として扱い、どちらも無ければ終了コード 2 にします。優先度の規則は [CLI インターフェース](Architecture-CLI-Interface.ja.md) の「オプションの優先度」で定めます。
+`--policy-dir <DIR>`(複数指定可)→ 環境変数 `YATA_POLICY_DIR`(OS のパスの区切り文字で複数指定可)の順に決めます。オプションと環境変数の両方があれば、オプションだけを使います(混ぜない)。既定の場所は設けず、どちらも無ければ終了コード 2 にします。優先度の規則は [CLI インターフェース](Architecture-CLI-Interface.ja.md) の「オプションの優先度」で定めます。
 
-`yata` はネットワークからポリシーを取得しません。ポリシーのリポジトリの取得・更新(git clone、ダウンロードなど)は利用者が行います。
+`yata` はポリシーを取得・更新しません(ダウンロードのコマンドも設けません)。取得・更新は利用者が、ポリシーのリポジトリの配布物(リリースのアーカイブ、git clone)で行います。`yata` は取得したポリシーの署名・出所を検証しません。配布の方法と改ざんの確認の手段は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「利用者の取得と指定」「改ざんの確認」で定めます。
 
 ### マニフェスト
 
@@ -261,8 +261,8 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 | --- | --- | --- |
 | `format_version` | 必須 | ポリシーの形式のバージョン(整数)。ディレクトリの構成、ルールの書式(`metadata` / `fail` / `message` / `reason`)、フィクスチャの形式、`input` / `data` の形のいずれかに互換性の無い変更をしたときに上げる |
 | `name` | 必須 | ポリシーのセットの名前。名前の文字の規則(`[a-z][a-z0-9_]*`、予約語を除く)に従う。ルール ID とパッケージ名の先頭になる。ログとレポートに出す |
-| `version` | 必須 | ポリシーのセットのバージョン(`x.y.z`)。ルール ID には含めない。ログとレポートに出す |
-| `min_yata_version` | 必須 | このポリシーのセットに必要な `yata` の最低バージョン(`x.y.z`)。新しいリソース種別を使うルールを足したときなどに上げる |
+| `version` | 必須 | ポリシーのセットのバージョン。SemVer に従う `x.y.z`(プレリリースの部分は使えない)。上げ方は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「バージョンの上げ方」。ルール ID には含めない。ログとレポートに出す |
+| `min_yata_version` | 必須 | このポリシーのセットに必要な `yata` の最低バージョン(`x.y.z`)。新しいリソース種別を使うルールを足したときなどに上げる(上げる時期は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「`min_yata_version` と `yata` のリリースの関係」) |
 
 ポリシーのディレクトリを複数指定した場合は、ディレクトリごとにマニフェストが必要で、ディレクトリごとに 1 つずつ検証します。1 つでも合わなければ終了コード 2 です。読み込んだマニフェストの `name` / `version` / `format_version` は、ディレクトリごとに 1 要素として `ScanReport.policies` に入れます([出力形式](Architecture-Output-Formats.ja.md))。
 
@@ -271,7 +271,7 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 - マニフェストがある。JSON として正しく、必須のキーがそろっている
 - `name` が名前の文字の規則(`[a-z][a-z0-9_]*`、予約語を除く)に従い、ほかのポリシーのディレクトリの `name` と重複しない
 - `format_version` が、その `yata` が対応する形式のバージョンである(対応するバージョンは `yata-engine` の定数で持つ。当面は `1` だけ)
-- `min_yata_version` が `x.y.z`(0 以上の整数 3 つを `.` でつないだもの)の形である。違えば形式の誤り
+- `version` と `min_yata_version` が `x.y.z`(0 以上の整数 3 つを `.` でつないだもの)の形である。違えば形式の誤り
 - `min_yata_version` が、実行中の `yata` のバージョン以下である。`x.y.z` の各数値を順に比べる。実行中の `yata` のバージョンにプレリリースの部分(`-alpha.1` など)やビルドメタデータがあれば、それを無視して `x.y.z` だけで比べる。比較のためのクレートは追加しない
 
 上限(この `yata` では読めない新しい形式)は `format_version` で表すため、マニフェストに `yata` のバージョンの上限は書きません。
@@ -361,7 +361,7 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 
 - ポリシーは評価の結果を左右する。改ざんされたポリシーは、検出を隠したり、誤った結果を出したりできる
 - そのため、利用者が信頼できる出所から取得したポリシーを使う前提とする
-- `yata` は、ポリシーの署名や出所を検証しない。署名・改ざんの確認は、未決事項の「ポリシーの取得・更新」に含める
+- `yata` は、ポリシーの署名や出所を検証しない。改ざんの確認は利用者が、ポリシーの配布元が提供する手段(チェックサム、配布元のリリースの署名付きの記録など)で行う
 
 **(b) 資源の上限**
 
@@ -415,12 +415,6 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 - ファイルやネットワークにアクセスする機能は有効にしない
 - `print` などの出力は標準出力に出さない。regorus の出力を集める機能(`set_gather_prints`)で受け取り、ログ(標準エラー出力、`debug`)に回す。標準出力はレポート専用のため
 - regorus は `default-features = false` とし、ファイル・ネットワークにアクセスせず結果が入力だけで決まる組み込み関数の機能(`base64`、`base64url`、`hex`、`glob`、`graph`、`jsonpatch`、`net`、`regex`、`semver`、`time`、`urlquery`)と、`std`、`arc`、`cache` を有効にする。`http`(`http.send`)、`opa-runtime`、`uuid`、`jsonschema`、`yaml`、`coverage`、`rvm`、`allocator-memory-limits` などは有効にしない。一覧と理由は [ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md) の「regorus の cargo feature」
-
-### 未決事項(安全性)
-
-| 項目 | 内容 | 決める時期 |
-| --- | --- | --- |
-| ポリシーの署名・改ざんの確認 | 「ポリシーの取得・更新」の未決事項に含める | ポリシーのリポジトリの配布方法を決める Issue |
 
 ## 評価
 
@@ -575,8 +569,5 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 | 項目 | 内容 | 決める時期 |
 | --- | --- | --- |
 | ルールの除外・抑制 | 特定のリソースやルールを結果から除外する仕組み(設定ファイル、タグなど)。ルール ID にバージョンを含めないので、ID を基準にできる | 別 Issue |
-| ポリシーのディレクトリの既定の場所 | プラットフォームのデータディレクトリ(例: Linux の `~/.local/share/yata/policies`)を既定にするか。既定にする場合はパスを決めるクレート(`directories` など)の追加が必要([初期依存クレート](Architecture-Initial-Dependencies.ja.md))。決まるまでは既定なし(指定が無ければ終了コード 2) | ポリシーのリポジトリの配布方法を決める Issue |
-| ポリシーの取得・更新 | ポリシーのリポジトリの取得・更新(git clone、リリースのアーカイブのダウンロードなど)を `yata` が行うか、利用者に任せるか。行う場合はネットワークへのアクセスと署名・改ざんの確認が必要になる。決まるまでは `yata` は取得しない | ポリシーのリポジトリの配布方法を決める Issue(この Issue の範囲外) |
-| ポリシーのリポジトリの構成 | リポジトリの名前、CI、リリースの方法、`yata` の取得方法(CI で使う `yata` のバージョンの固定など) | ポリシーのリポジトリを作る Issue(この Issue の範囲外) |
 | `data` だけに依存する計算の共有 | regorus は評価のたびにルールの値のキャッシュを消すため、`data` だけに依存する補助のルールがリソースごとに計算し直される。大きなアカウントで遅いルールが現れたら、ルール × アカウントごとに 1 回だけ計算して共有する仕組み(例: ルールが宣言した補助のルールをエンジンが先に評価して `data` に入れる)を検討する。仕組みはルールの書式に関わるため、入れるなら `format_version` との関係も決める | リソースごとの評価を実装する Issue で性能を測り、問題があればその時点で別 Issue |
 | `time.now_ns` とフィクスチャ | 現在の時刻を使うルールのフィクスチャの結果が、実行する日で変わらないようにする方法([ポリシーエンジンと `yata rules test`](../features/Feature-0008-Policy-Engine-and-Rules-Test.ja.md) の未決事項) | 時刻を使うルールを作るポリシーのリポジトリの Issue の前 |
