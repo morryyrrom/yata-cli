@@ -36,7 +36,7 @@
 - `yata scan`、`yata collect`、`yata rules list`、`yata permissions` とレポートの出力(`ScanReport`、`yata-report`)
 - ルールの絞り込み(`--rule`、`--exclude-rule`、`--min-severity`)の関数。`yata rules test` は絞り込みを使わないため、`scan` などを実装する Issue で `yata-engine` に足す
 - ルール本体(ポリシーのリポジトリで作る)と、ポリシーのリポジトリの構成・CI の定義
-- 全体設計の「未決事項(安全性)」のうち、ポリシーの署名・改ざんの確認
+- ポリシーの署名・改ざんの確認(`yata` では検証しない。[ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「(a) 信頼の前提」)
 - ルールの評価の並列化([ポリシー評価](../architecture/Architecture-Policy-Evaluation.ja.md) の「評価」のとおり、必要になったら行う)
 
 ## 実装の段階

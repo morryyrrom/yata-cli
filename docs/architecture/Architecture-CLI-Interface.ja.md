@@ -33,9 +33,9 @@
 
 - 上から順に見て、最初に指定されているものだけを使う。オプションと環境変数の両方が指定されたら、**混ぜずにオプションだけを使う**。複数指定できるオプション(`--policy-dir` など)でも同じで、`--policy-dir` を 1 つでも指定すれば `YATA_POLICY_DIR` は使わない
 - 環境変数を持つのは、実行する環境ごとに決まる設定(パス、ログ、色、認証のプロファイル)だけとする。1 回の実行ごとに選ぶ設定(出力形式、ルールの絞り込みなど)はオプションだけで指定する。環境変数を増やしすぎると、どの設定が効いているかが分かりにくくなるため。設定ファイルは未決事項
+- `--policy-dir` には既定の場所を設けない。オプションも環境変数も無ければ終了コード 2 にする
+- `YATA_POLICY_DIR` を分けた結果の空の要素(`a::b` の間など)は捨てる。空の要素しか無い(空文字列を含む)ときは指定が無いものとして扱い、`--policy-dir` も無ければ終了コード 2 にする
 - **既定値が未決の項目**
-  - 既定の場所が未決の項目(`--policy-dir`)は、決まるまで「既定なし」として扱い、オプションも環境変数も無ければ終了コード 2 にする
-  - `YATA_POLICY_DIR` を分けた結果の空の要素(`a::b` の間など)は捨てる。空の要素しか無い(空文字列を含む)ときは指定が無いものとして扱い、`--policy-dir` も無ければ終了コード 2 にする
   - 既定の値が未決の項目(`--fail-on`、`--concurrency`)は、それを実装する Issue で値を決め、最初のリリースまでにこの表に反映する
 
 ### オプションと環境変数・既定値の一覧
@@ -44,7 +44,7 @@
 | --- | --- | --- | --- |
 | `-v`, `--verbose`(繰り返し可) / `-q`, `--quiet` | `YATA_LOG`(`tracing-subscriber` の `EnvFilter` の書式) | `warn` | すべて |
 | `--color <auto\|always\|never>` | `NO_COLOR`(値にかかわらず、あれば `never`) | `auto`(端末のときだけ色を付ける) | すべて |
-| `--policy-dir <DIR>`(複数指定可) | `YATA_POLICY_DIR`(OS のパスの区切り文字で複数指定可。Linux / macOS は `:`、Windows は `;`) | なし(未決事項)。どちらも無ければ終了コード 2 | `scan`、`collect`、`rules list`、`rules test`、`permissions` |
+| `--policy-dir <DIR>`(複数指定可) | `YATA_POLICY_DIR`(OS のパスの区切り文字で複数指定可。Linux / macOS は `:`、Windows は `;`) | なし(既定の場所は設けない)。どちらも無ければ終了コード 2 | `scan`、`collect`、`rules list`、`rules test`、`permissions` |
 | `--rule <PATTERN>`(複数指定可) | なし | すべてのルール | `scan`、`collect`、`rules list`、`permissions` |
 | `--exclude-rule <PATTERN>`(複数指定可) | なし | なし | 同上 |
 | `--min-severity <SEVERITY>` | なし | `info`(すべて) | 同上 |
@@ -164,5 +164,4 @@ AWS の認証情報とリージョンの環境変数(`AWS_ACCESS_KEY_ID`、`AWS_
 | `--fail-on` の既定値 | 既定を `info`(すべての検出で 1)とするか、より高い重要度とするか | CLI の `scan` を実装する Issue(メンテナーの判断が必要) |
 | `--concurrency` の既定値 | [AWS アクセス](Architecture-AWS-Access.ja.md) の未決事項 | AWS プロバイダを実装する Issue |
 | 進捗表示 | 収集中の進捗を標準エラー出力に表示するか | CLI の `scan` を実装する Issue |
-| ポリシーのディレクトリの既定の場所 | 既定の場所を設けるか([ポリシー評価](Architecture-Policy-Evaluation.ja.md) の未決事項)。決まるまでは既定なし | ポリシーのリポジトリの配布方法を決める Issue |
 | `--profile` の認証情報の限定 | `--profile` のとき、環境変数の認証情報を使わずにプロファイルの認証情報だけを使う方法(`aws-config` でプロファイルの認証情報プロバイダを明示する方法)の確認 | AWS プロバイダを実装する Issue |
