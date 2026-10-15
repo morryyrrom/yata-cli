@@ -1,0 +1,178 @@
+[
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetBucketLogging": {
+        "LoggingEnabled": {
+          "TargetBucket": "example-logs-bucket",
+          "TargetGrants": [
+            {
+              "Grantee": {
+                "DisplayName": "example-user",
+                "EmailAddress": null,
+                "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "Type": "CanonicalUser",
+                "URI": null
+              },
+              "Permission": "FULL_CONTROL"
+            }
+          ],
+          "TargetObjectKeyFormat": {
+            "PartitionedPrefix": {
+              "PartitionDateSource": "EventTime"
+            },
+            "SimplePrefix": {}
+          },
+          "TargetPrefix": "example-bucket/"
+        }
+      },
+      "GetBucketPolicy": {
+        "Policy": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": [
+                "arn:aws:s3:::alpha-bucket",
+                "arn:aws:s3:::alpha-bucket/*"
+              ],
+              "Sid": "DenyInsecureTransport"
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      },
+      "GetPublicAccessBlock": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        }
+      },
+      "ListBuckets": {
+        "Buckets": [
+          {
+            "BucketArn": null,
+            "BucketRegion": "us-east-1",
+            "CreationDate": "2026-01-01T00:00:00Z",
+            "Name": "alpha-bucket"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "example-owner",
+          "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "Prefix": null
+      }
+    },
+    "id": "arn:aws:s3:::alpha-bucket",
+    "name": "alpha-bucket",
+    "region": "us-east-1",
+    "tags": {},
+    "type": "aws.s3.bucket"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetBucketLogging": {
+        "LoggingEnabled": null
+      },
+      "GetBucketPolicy": null,
+      "GetPublicAccessBlock": null,
+      "ListBuckets": {
+        "Buckets": [
+          {
+            "BucketArn": null,
+            "BucketRegion": "eu-west-1",
+            "CreationDate": "2026-01-01T00:00:00Z",
+            "Name": "beta-bucket"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "example-owner",
+          "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "Prefix": null
+      }
+    },
+    "id": "arn:aws:s3:::beta-bucket",
+    "name": "beta-bucket",
+    "region": "eu-west-1",
+    "tags": {},
+    "type": "aws.s3.bucket"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetBucketLogging": {
+        "LoggingEnabled": null
+      },
+      "GetBucketPolicy": null,
+      "GetPublicAccessBlock": null,
+      "ListBuckets": {
+        "Buckets": [
+          {
+            "BucketArn": null,
+            "BucketRegion": "eu-west-1",
+            "CreationDate": "2026-01-01T00:00:00Z",
+            "Name": "delta-bucket"
+          }
+        ],
+        "Owner": {
+          "DisplayName": null,
+          "ID": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+        },
+        "Prefix": "example-"
+      }
+    },
+    "id": "arn:aws:s3:::delta-bucket",
+    "name": "delta-bucket",
+    "region": "eu-west-1",
+    "tags": {},
+    "type": "aws.s3.bucket"
+  },
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetBucketLogging": {
+        "LoggingEnabled": null
+      },
+      "GetBucketPolicy": null,
+      "GetPublicAccessBlock": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": null,
+          "IgnorePublicAcls": null,
+          "RestrictPublicBuckets": null
+        }
+      },
+      "ListBuckets": {
+        "Buckets": [
+          {
+            "BucketArn": null,
+            "BucketRegion": "ap-northeast-1",
+            "CreationDate": "2026-01-01T00:00:00Z",
+            "Name": "gamma-bucket"
+          }
+        ],
+        "Owner": {
+          "DisplayName": null,
+          "ID": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+        },
+        "Prefix": "example-"
+      }
+    },
+    "id": "arn:aws:s3:::gamma-bucket",
+    "name": "gamma-bucket",
+    "region": "ap-northeast-1",
+    "tags": {},
+    "type": "aws.s3.bucket"
+  }
+]
