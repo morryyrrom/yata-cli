@@ -35,6 +35,7 @@ fn policy_dir() -> PathBuf {
 }
 
 fn load(timeout: Duration) -> LoadedPolicies {
+    install_print_log();
     let options = LoadOptions {
         yata_version: YataVersion::new(0, 1, 0),
         limits: ResourceLimits::default(),
@@ -958,9 +959,36 @@ fn outcomes_are_ordered_by_rule_id_then_account_and_use_each_accounts_data() {
     assert_eq!(outcomes[5].results[0].resource.account, third);
 }
 
+/// A `(level, rule, message)` record of one event of the `print` target.
+type PrintEvent = (String, String, String);
+
+thread_local! {
+    /// The `print` events of this thread, recorded only while [`capture_prints`] runs.
+    static CAPTURED: std::cell::RefCell<Option<Vec<PrintEvent>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// A minimal `tracing` subscriber that records the events of the `print` target.
-#[derive(Clone, Default)]
-struct PrintLog(std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>);
+///
+/// It is the global default of this test binary rather than a scoped one: tracing caches each
+/// callsite's interest for the whole process, and while a single scoped subscriber is
+/// registered, a callsite registered on another thread (every test runs `print` while loading
+/// the policies) can be cached as `never`, so the event is lost. As the global default it is
+/// installed by [`load`] before any policy runs, so every callsite is enabled on every thread.
+struct PrintLog;
+
+/// Installs [`PrintLog`] as the global default subscriber, once per process.
+fn install_print_log() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| tracing::subscriber::set_global_default(PrintLog).unwrap());
+}
+
+/// Runs `f` and returns the `print` events it logged on this thread.
+fn capture_prints<T>(f: impl FnOnce() -> T) -> (T, Vec<PrintEvent>) {
+    CAPTURED.set(Some(Vec::new()));
+    let value = f();
+    (value, CAPTURED.take().unwrap())
+}
 
 struct FieldCollector {
     rule: String,
@@ -994,10 +1022,11 @@ impl tracing::Subscriber for PrintLog {
         event.record(&mut collector);
         let level = event.metadata().level().to_string();
         if event.metadata().target() == "yata_engine::rego_print" {
-            self.0
-                .lock()
-                .unwrap()
-                .push((level, collector.rule, collector.message));
+            CAPTURED.with_borrow_mut(|captured| {
+                if let Some(events) = captured {
+                    events.push((level, collector.rule, collector.message));
+                }
+            });
         }
     }
     fn enter(&self, _: &tracing::span::Id) {}
@@ -1014,14 +1043,11 @@ fn print_output_goes_to_the_debug_log_with_the_rule_id() {
     printed.name = Some("printed".to_owned());
     put(&mut inv, EAST, WIDGET, vec![printed]);
 
-    let log = PrintLog::default();
-    let guard = tracing::subscriber::set_default(log.clone());
-    let outcome = one(evaluate(&[rule(&loaded, "printing")], &inv));
-    drop(guard);
+    let (outcomes, events) = capture_prints(|| evaluate(&[rule(&loaded, "printing")], &inv));
+    let outcome = one(outcomes);
 
     assert_eq!(outcome.status, RuleStatus::Evaluated);
     assert_eq!(summary(&outcome), [triple("w-1", EAST, ResultStatus::Fail)]);
-    let events = log.0.lock().unwrap().clone();
     assert_eq!(events.len(), 1, "{events:?}");
     let (level, rule_id, message) = &events[0];
     assert_eq!(level, "DEBUG");
