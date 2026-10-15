@@ -10,7 +10,7 @@ flowchart LR
 
     subgraph LB["ListBuckets (us-east-1, every page)"]
         L1["Any error, with the kind of its code"]
-        L2["Element without Name, or BucketRegion missing or invalid, or CreationDate not formattable"]
+        L2["Element of Buckets without Name, or BucketRegion missing or invalid, or CreationDate not formattable"]
     end
 
     subgraph GP["GetBucketPolicy (bucket region)"]

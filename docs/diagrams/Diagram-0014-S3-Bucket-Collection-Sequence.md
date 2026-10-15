@@ -17,14 +17,14 @@ sequenceDiagram
                 Note over C: Group failure (CollectError). Pages read so far are discarded
             end
         else Page returned
-            SU-->>C: Page (Buckets may be absent, Owner may be absent, ContinuationToken)
+            SU-->>C: Page (Buckets may be absent, Owner may be absent, Prefix may be absent, ContinuationToken)
         end
     end
 
     alt An element has no Name, or no BucketRegion, or an invalid BucketRegion, or CreationDate cannot be formatted
         Note over C: Group failure (invalid_response). Codes MissingName, MissingBucketRegion, InvalidBucketRegion, InvalidDateTime
     else Elements are kept, none are filtered
-        Note over C: ListBuckets value = the 4 fields of the element plus the Owner of its page, in API order
+        Note over C: ListBuckets value = {Buckets: [that element], Owner, Prefix} of the page that returned the element, in API order. Owner or Prefix is null when that page did not return it. ContinuationToken is not included
         Note over C: No Buckets in any page means 0 buckets, and no bucket calls are made
 
         Note over C: Step 2: one client per distinct BucketRegion, created with ctx.client
@@ -71,7 +71,7 @@ sequenceDiagram
         Note over J,R: Step 4: values are returned in bucket list order
         loop For each bucket
             J->>R: Values of the 3 keys, plus the ListBuckets value
-            R->>R: id = arn:aws:s3:::Name (partition aws), name = Name, region = BucketRegion, tags = empty object
+            R->>R: id = arn:aws:s3:::Name (partition aws), name = Buckets[0].Name, region = Buckets[0].BucketRegion, tags = empty object
         end
         Note over R: One Resource per bucket across all pages. Failure marks are logged as one warn line per operation
     end

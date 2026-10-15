@@ -4,7 +4,7 @@
 
 S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_public_access_block`)のコレクターを設計します。
 
-最初のルール群と、使う種別・操作・権限は [最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) で決まっています(とくに「コレクターの方針」「S3 のバケット」)。コレクターの枠組み(`Collector`、`CollectContext`、`CollectError`、失敗の印、エラーの種類の判定、読み取り専用ガード)は [AWS プロバイダの基盤](Feature-0007-AWS-Provider-Foundation.ja.md)、組の中の並行の呼び出し(`support::fan_out`)・変換(`support::convert`)・期待するファイルとの比較(`support::golden`)は [IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) に従います。構成情報の形の規則は [リソースモデル](../architecture/Architecture-Resource-Model.ja.md)、エラーの扱いは [エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md)、テストは [テスト方針](../architecture/Architecture-Testing-Strategy.ja.md) に従います。
+最初のルール群と、使う種別・操作・権限は [最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) で決まっています(とくに「コレクターの方針」「S3 のバケット」)。コレクターの枠組み(`Collector`、`CollectContext`、`CollectError`、失敗の印、エラーの種類の判定、読み取り専用ガード)は [AWS プロバイダの基盤](Feature-0007-AWS-Provider-Foundation.ja.md)、組の中の並行の呼び出し(`support::fan_out`)・変換(`support::convert`)・期待するファイルとの比較(`support::golden`)は [IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) に従います。構成情報の形の規則は [リソースモデル](../architecture/Architecture-Resource-Model.ja.md)(列挙の操作 `ListBuckets` の値の形は、同ページの「列挙の操作の値」と [ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md))、エラーの扱いは [エラー処理とログ](../architecture/Architecture-Error-Handling-and-Logging.ja.md)、テストは [テスト方針](../architecture/Architecture-Testing-Strategy.ja.md) に従います。
 
 ## 目的と背景
 
@@ -35,7 +35,7 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
   - 最初のルール群の 3 コントロールは、ディレクトリバケットでは判定の意味が薄い。ディレクトリバケットは、バケット単位のブロックパブリックアクセスの設定がすべて有効で変更できず(ユーザーガイド「Access management」)、`GetPublicAccessBlock` と `GetBucketLogging` はディレクトリバケットに対応していない(各 API リファレンスの注記)
   - 扱いは未決事項「ディレクトリバケット」とする
 - ルートの `Cargo.toml`、`crates/yata-provider-aws/Cargo.toml`、`Cargo.lock` の変更。必要な依存(`aws-sdk-s3`、`aws-sdk-s3control` と各 `test-util`)は基盤の Issue で入っている
-- `support/` など共有のファイル、`docs/architecture/` の変更。この設計と全体設計・既存の設計書の差は、下の「既存の設計との差異」にまとめる
+- `support/` など共有のファイル、`docs/architecture/` の変更。この設計と既存の設計書の差は、下の「既存の設計との差異」にまとめる
 - CLI のオプションの追加
 
 ## 共通の方針
@@ -46,7 +46,9 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
   - `ListBuckets` の `Prefix` と `BucketRegion`(結果を絞り込むパラメーター)は付けない
   - バケットごとの操作の `ExpectedBucketOwner`(所有者が違えば 403 にする任意のヘッダー)は付けない。`ListBuckets` は呼び出し元のアカウントが所有するバケットだけを返すため、付けても結果は変わらず、既定のパラメーターで呼ぶ方針に合わせる
 - **絞り込まない・置き換えない**: `ListBuckets` が返したバケットは、リージョン・名前・作成日にかかわらずすべてリソースにする
-- **許す変換**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バケットポリシーの JSON のパース(下の「`GetBucketPolicy` の `Policy` の変換」)だけ
+- **許す変換**: SDK の型から JSON への変換、日時の RFC 3339 の文字列への変換、列挙の値の文字列への変換、バケットポリシーの JSON のパース(下の「`GetBucketPolicy` の `Policy` の変換」)だけ。ページングの項目を入れないことと、`ListBuckets` の `Buckets` をバケットごとに分けることは、全体設計の「格納の形」のとおり
+- **列挙の操作の値**: `ListBuckets` はリソースを列挙する操作で、値は全体設計の「列挙の操作の値」の形(ページごとの値)にする(下の「`ListBuckets`」)。[IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) の「共通の方針」の「ページングの結合」(全ページの要素を 1 つの配列につなぐ)は、`ListBuckets` には使わない
+- **ページングの項目**: `ListBuckets` の出力のページングの項目は `ContinuationToken` だけ(全体設計の「ページングの項目と応答のメタデータ」)。バケットごとの 3 つの操作と S3 Control の `GetPublicAccessBlock` にはページが無く、ページングの項目も無い
 - **秘密の値も伏せない**: この 2 種別の応答に秘密の値は無いが、バケットポリシーの文書(プリンシパルのアカウント ID、条件の値など)やログの付与先の `EmailAddress` などは、そのまま入れる
 - **途中のページの失敗**: `ListBuckets` のどのページの失敗も、それまでのページの結果を使わず組全体の失敗にする
 - **グローバルの扱い**: 2 種別とも `Scope::Global`。`collect` に渡されるリージョン(`us-east-1`)に向けて、`ListBuckets` と S3 Control の `GetPublicAccessBlock` を呼ぶ。バケットごとの操作は、そのバケットのリージョンに送る(下の「バケットのリージョンの扱い」)
@@ -66,13 +68,14 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 
 | 場合 | 扱い |
 | --- | --- |
-| `ListBuckets` の要素に `Name` が無い | 組全体の失敗(`CollectError`、`invalid_response`)。`id` を決められず、要素を落とすと絞り込みになるため |
-| `ListBuckets` の要素に `BucketRegion` が無い、またはリージョン名の形式でない | 組全体の失敗(`invalid_response`)。リソースの `region` を決められず、バケットごとの操作の送り先も決まらないため(下の「バケットのリージョンの扱い」) |
-| `ListBuckets` の要素の `CreationDate` を整形できない | 組全体の失敗(`invalid_response`) |
+| `ListBuckets` の `Buckets` の要素に `Name` が無い | 組全体の失敗(`CollectError`、`invalid_response`)。`id` を決められず、要素を落とすと絞り込みになるため |
+| `ListBuckets` の `Buckets` の要素に `BucketRegion` が無い、またはリージョン名の形式でない | 組全体の失敗(`invalid_response`)。リソースの `region` を決められず、バケットごとの操作の送り先も決まらないため(下の「バケットのリージョンの扱い」) |
+| `ListBuckets` の `Buckets` の要素の `CreationDate` を整形できない | 組全体の失敗(`invalid_response`) |
 
 - メッセージは `"invalid response when calling ListBuckets (<理由のコード>)"` の形にし、理由のコードは `MissingName`、`MissingBucketRegion`、`InvalidBucketRegion`、`InvalidDateTime` とする。バケット名などの識別子は含めず、`debug` のログに出す
 - リージョン名の形式の検査には、`--region` の検査と同じ関数(`crate::is_valid_region_name`)を使う
-- バケットごとの操作の出力には日時が無いため、バケットごとの操作で値を変換できない場合は生じない(SDK が応答を解釈できない場合は、SDK のエラー `ResponseError` として失敗の印になる)
+- 検査するのは `Buckets` の要素の項目だけ。最上位の `Owner`・`Prefix` は文字列だけで値を変換できない場合は無く、ページによって値が違っても不正としない(列挙の操作ではページごとの値をそのまま入れる。全体設計の「列挙の操作の値」)
+- バケットごとの操作の出力には日時が無いため、バケットごとの操作で値を変換できない場合は生じない(SDK が応答を解釈できない場合は、SDK のエラー `ResponseError` として、種類が `invalid_response` の失敗の印になる。[AWS プロバイダの基盤](Feature-0007-AWS-Provider-Foundation.ja.md) の「エラーの種類の判定」の表のとおり)
 
 ## 種別ごとの設計
 
@@ -86,11 +89,11 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 | `required_permissions` | `["s3:ListAllMyBuckets", "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketLogging"]` |
 | リソースの件数 | `ListBuckets` が返したバケットの数(全ページ) |
 | `id` | バケットの ARN を形式から作る: `arn:<partition>:s3:::<Name>`(例: `arn:aws:s3:::example-bucket`) |
-| `name` | `Name` |
-| `region` | `BucketRegion`(例: `eu-west-1`) |
+| `name` | そのバケットの要素の `Name`(構成情報では `ListBuckets.Buckets[0].Name`) |
+| `region` | そのバケットの要素の `BucketRegion`(構成情報では `ListBuckets.Buckets[0].BucketRegion`。例: `eu-west-1`) |
 | `tags` | 常に `{}`(タグを取得しない種別) |
 | `null` にするエラー | `GetBucketPolicy` の `NoSuchBucketPolicy`、`GetPublicAccessBlock` の `NoSuchPublicAccessBlockConfiguration` |
-| 組全体の失敗 | `ListBuckets` の失敗(どのページでも)。`Name`・`BucketRegion` の無い要素、`BucketRegion` の形式の誤り、整形できない `CreationDate`(上の「値を変換できない場合」) |
+| 組全体の失敗 | `ListBuckets` の失敗(どのページでも)。`Name`・`BucketRegion` の無い `Buckets` の要素、`BucketRegion` の形式の誤り、整形できない `CreationDate`(上の「値を変換できない場合」) |
 | 失敗の印 | バケットごとの 3 つの操作の、上の `null` にするエラー以外の失敗(そのバケットのそのキーだけ) |
 
 図: [aws.s3.bucket の構成情報のキー](../diagrams/Diagram-0014-S3-Bucket-Config-Keys.md)
@@ -100,14 +103,19 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 ```json
 {
   "ListBuckets": {
-    "BucketArn": null,
-    "BucketRegion": "eu-west-1",
-    "CreationDate": "2026-01-01T00:00:00Z",
-    "Name": "example-bucket",
+    "Buckets": [
+      {
+        "BucketArn": null,
+        "BucketRegion": "eu-west-1",
+        "CreationDate": "2026-01-01T00:00:00Z",
+        "Name": "example-bucket"
+      }
+    ],
     "Owner": {
       "DisplayName": null,
       "ID": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    }
+    },
+    "Prefix": null
   },
   "GetBucketPolicy": {
     "Policy": {
@@ -161,10 +169,13 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 
 **`ListBuckets`**
 
-- 値は、出力の `Buckets` の中のそのバケットの要素の 4 項目(`BucketArn`、`BucketRegion`、`CreationDate`、`Name`)に、そのページの出力の `Owner`(`{"DisplayName": ..., "ID": ...}`)を加えたもの
-  - `Owner` は出力の最上位の項目で、API リファレンスでは「The owner of the buckets listed」(一覧のバケットの所有者)。どのバケットにも同じ値が入る。要素ごとに 1 対 1 で付随する情報として、要素と同じ値に入れる。出力の最上位の項目を要素の値に加えるのは、全体設計の「格納の形」(一覧の操作は要素だけ)を広げる扱いになる。この扱いは、別の Issue(#39)で全体設計([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」)を先に更新して main へ入れ、この設計のマージはそのあとにする(「既存の設計との差異」)
-  - `Owner` を返さなかったページの要素では `"Owner": null`。`DisplayName` は返らなければ `null`(API リファレンスの応答の例も `ID` だけを返している)
-  - `ContinuationToken` はページングの項目、`Prefix` は要求の `Prefix` を返すだけの項目(要求に付けた場合だけ返る)なので、入れない
+- 値の形は全体設計の「列挙の操作の値」による。ここでは `ListBuckets` に当てはめた結果だけを示す
+- 出力の最上位の項目は `Buckets`、`Owner`、`ContinuationToken`、`Prefix`(API リファレンスの応答の要素と、`aws-sdk-s3` 1.152.0 の `ListBucketsOutput`)。ページングの項目は `ContinuationToken` で、入れない。値は `{"Buckets": [<そのバケットの要素>], "Owner": ..., "Prefix": ...}` になる
+  - `Buckets`: そのバケットの要素 1 つだけの配列。要素は 4 項目(`BucketArn`、`BucketRegion`、`CreationDate`、`Name`)をすべて入れ、返らない項目は `null`(`Name`・`BucketRegion` が無い場合は上の「値を変換できない場合」)
+  - `Owner`: その要素を返したページの `Owner`(`{"DisplayName": ..., "ID": ...}`)。そのページが返さなければ `null`、`DisplayName` は返らなければ `null`(API リファレンスの応答の例も `ID` だけを返している)
+  - `Prefix`: その要素を返したページの `Prefix`。要求に `Prefix` を付けない(上の「共通の方針」)ため、通常は `null`。返った場合はそのまま入れる
+- Rego からは `input.configuration.ListBuckets.Buckets[0].Name`、`input.configuration.ListBuckets.Owner.ID` のように参照する
+- あるページが `Buckets` を返さない、または空の配列を返した場合、そのページからはリソースができない(そのページの `Owner`・`Prefix` を入れるリソースも無い)
 - `BucketArn` は、API リファレンスでディレクトリバケットにだけ対応する項目とされ、汎用バケットでは通常 `null`。返った場合もそのまま入れる
 - `CreationDate` は、API リファレンスの注記のとおり、バケットポリシーの変更などで変わることがある。値は API が返したまま入れる
 - どのページも `Buckets` を返さなかった場合は、バケットが 0 件として扱う(要素がリソースそのものなので `null` を入れる場所が無く、バケットが 0 件のアカウントは正しく存在するため。IAM の `ListPolicies` のように常に要素があるとは言えない)
@@ -193,7 +204,7 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 - `LoggingEnabled` は 4 項目(`TargetBucket`、`TargetGrants`、`TargetPrefix`、`TargetObjectKeyFormat`)
   - `TargetGrants` は、返れば要素ごとに `{"Grantee": {...} | null, "Permission": <文字列> | null}` の配列、返らなければ `null`。`Grantee` は 5 項目(`DisplayName`、`EmailAddress`、`ID`、`Type`、`URI`)。`Type` は API の XML では属性(`xsi:type`)だが、API リファレンスと AWS CLI の JSON 出力のメンバー名 `Type` を使う
   - `TargetObjectKeyFormat` は、返れば `{"PartitionedPrefix": {"PartitionDateSource": ...} | null, "SimplePrefix": {} | null}`、返らなければ `null`。`SimplePrefix` は項目を持たない型なので、返れば空のオブジェクト `{}` になる
-- 4.4 は、証跡の `S3BucketName` と同じ `name` のバケットの `GetBucketLogging.LoggingEnabled` が `null` でないかを見る。照合はバケットの `name`(または `ListBuckets.Name`)で行い、`id` の形には頼らない
+- 4.4 は、証跡の `S3BucketName` と同じ `name` のバケットの `GetBucketLogging.LoggingEnabled` が `null` でないかを見る。照合はバケットの `name`(または `ListBuckets.Buckets[0].Name`)で行い、`id` の形には頼らない
 
 **`id`・`name`・`region`・`tags`**
 
@@ -201,13 +212,13 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
   - パーティションは `support::partition::SUPPORTED_PARTITION`(`aws`)を使う。ARN を作る関数はパーティションを引数に取る形にし、`aws` 以外のパーティションに対応するときに直せるようにする
   - `BucketArn` が返った場合も、`id` には使わず形式から作る。`BucketArn` はディレクトリバケットにだけ対応すると文書化されており、汎用バケットの `id` を応答の有無で変えないため。`BucketArn` が返り、作った ARN と違う場合は `debug` のログに出す
   - バケット名はすべてのアカウント・リージョンで一意なので、`ResourceSet` の中で `id` は重ならない
-- `name` は `Name`
-- `region` は `BucketRegion`。`ResourceSet` の `region` は `global` のまま([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ResourceSet」)
+- `name` は、そのバケットの要素の `Name`(`ListBuckets.Buckets[0].Name` と同じ値)
+- `region` は、そのバケットの要素の `BucketRegion`(`ListBuckets.Buckets[0].BucketRegion` と同じ値)。`ResourceSet` の `region` は `global` のまま([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「ResourceSet」)
 - `tags` は常に `{}`。`aws.s3.bucket` は、この範囲ではタグを取得しない種別とし、`tags` は「タグが無い」ことを表さない。ルールはこの種別の `tags` を判定に使わない(未決事項「バケットのタグ」)
 
 **処理の順**
 
-1. `ListBuckets` の全ページを取る(失敗したら組全体の失敗)。各要素から `Name`・`BucketRegion` を取り出し、`ListBuckets` の値を作る(上の「値を変換できない場合」に当たれば組全体の失敗)
+1. `ListBuckets` の全ページを取る(失敗したら組全体の失敗)。各ページの `Buckets` の要素ごとに、`Name`・`BucketRegion` を取り出し、その要素とそのページの `Owner`・`Prefix` から `ListBuckets` の値を作る(上の「値を変換できない場合」に当たれば組全体の失敗)。バケットの並びは、ページの順、ページの中では API が返した順とする
 2. 要素に現れた `BucketRegion` ごとに、`ctx.client::<aws_sdk_s3::Client>(<BucketRegion>)` でクライアントを 1 つずつ作る
 3. バケットごとに、`GetBucketPolicy` → `GetPublicAccessBlock` → `GetBucketLogging` の順に呼ぶ 1 つの仕事を作り、`support::fan_out` で上限付きで並行に実行する(下の「組の中の並行の呼び出し」)。仕事には、バケット名(所有する文字列)と、そのバケットのリージョンのクライアントの複製を渡す。3 つの操作は、それぞれ独立に成功・`null`・失敗の印を記録する(1 つの失敗で、残りを呼ばないことはしない)
 4. バケットごとに `Resource` を組み立てる
@@ -216,7 +227,7 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 
 #### バケットのリージョンの扱い
 
-- **送り先**: バケットごとの 3 つの操作は、`ListBuckets` の `BucketRegion` のリージョンに向けたクライアントで呼ぶ。S3 は、バケットのリージョンと違うリージョンのエンドポイントへの要求を受け付けない(`PermanentRedirect` などのエラーを返す)。AWS SDK for Rust の `aws-sdk-s3`(1.152.0)には、そのようなエラーを受けて別のリージョンへ送り直す処理が無い(応答のヘッダー `x-amz-bucket-region` を読むのは `HeadBucket` の出力の解釈だけ)ため、送り先を最初から正しく決める
+- **送り先**: バケットごとの 3 つの操作は、`ListBuckets` の `Buckets` の要素の `BucketRegion` のリージョンに向けたクライアントで呼ぶ。S3 は、バケットのリージョンと違うリージョンのエンドポイントへの要求を受け付けない(`PermanentRedirect` などのエラーを返す)。AWS SDK for Rust の `aws-sdk-s3`(1.152.0)には、そのようなエラーを受けて別のリージョンへ送り直す処理が無い(応答のヘッダー `x-amz-bucket-region` を読むのは `HeadBucket` の出力の解釈だけ)ため、送り先を最初から正しく決める
 - **`BucketRegion` を使う理由**: API リファレンスでは、`BucketRegion` は要求にパラメーターが 1 つ以上ある場合に返る。ページングの形(`MaxBuckets` 付き)で呼ぶため、常に返る想定とする。値はリージョンコード(API リファレンスの応答の例では `us-east-1`、`us-east-2`)で、`GetBucketLocation` の `LocationConstraint` のような旧来の表記(`EU`、`us-east-1` を表す空の値)ではないため、リージョン名の形式の検査に通る。`GetBucketLocation` や `HeadBucket` でリージョンを調べ直すことはしない(操作と権限が増える。`HeadBucket` は `Describe` / `List` / `Get` で始まらず、読み取り専用ガードが拒否する)
 - **`BucketRegion` が無い・形式が誤っている場合**: 組全体の失敗(`invalid_response`)にする(上の「値を変換できない場合」)。リソースの `region` は必須の文字列で、`global` などを仮に入れるとルールの判定(4.4 のリージョンの扱いなど)を誤らせうるため。通常は起こらない応答とし、起こった場合の補い方は未決事項「`BucketRegion` が欠けた場合の補い方」とする
 - **接続できないリージョン**: DNS の解決の失敗・接続の失敗(`DispatchFailure` で `is_io()` が真)は、既存の判定の表で `region_unavailable` になり、そのバケットのそのキーに失敗の印が置かれる([最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) の「S3 のバケット」)。`OptInRequired` のコードも `region_unavailable` になる
@@ -288,7 +299,7 @@ S3 の 2 つのリソース種別(`aws.s3.bucket`、`aws.s3control.account_publi
 - **集中しない**: 1 つのバケットに送るのは 3 つの要求を順にだけで、同時に送る 8 つの要求は別々のバケット(多くは複数のリージョン)に向く。往復を 100〜300 ms とすると、組全体で毎秒 30〜80 程度の要求で、1 つのバケットへの速さは問題にならない
 - **アカウント単位の制限**: バケットの設定の API にアカウント単位の制限があるかは公表されていない。IAM と同じく、ほかの利用者(デプロイのパイプラインなど)と枠を分け合う可能性があるため、控えめな 8 を使う
 - **再試行の割当て**: `aws-sdk-s3`(1.152.0)の `src/config.rs` の既定の再試行の分割の名前は `s3-<リージョン>`。再試行の割当て(トークンバケット)は、バケットのリージョンごとに分かれる。あるリージョンでスロットリングが続いても、ほかのリージョンのバケットの再試行は妨げられない。`ListBuckets`(`us-east-1`)は `us-east-1` のバケットの操作と割当てを共有するが、`ListBuckets` は並行の仕事を始める前に終わる。S3 Control は別の分割(`s3control-us-east-1`)
-- **IAM の組との関係**: S3 と IAM は別のサービスで、再試行の割当ても制限も分かれる。組の中で並行に呼ぶ組(`aws.iam.user` 8、`aws.iam.policy` 8、`aws.s3.bucket` 8)と、単発の呼び出しの組(`aws.iam.account_summary`、`aws.iam.password_policy`、`aws.s3control.account_public_access_block` の各 1)が同時に動いても、同時の呼び出しは最大 8 + 8 + 8 + 1 + 1 + 1 = 27 で(IAM の最大 18 に S3 の 9 が加わる)、手元の資源の点でも問題にならない
+- **IAM の組との関係**: S3 と IAM は別のサービスで、再試行の割当ても制限も分かれる。IAM への同時の呼び出しは最大 19(`aws.iam.user` の `fan_out` 8 と認証情報レポートの 1、`aws.iam.policy` 8、`aws.iam.account_summary`・`aws.iam.password_policy` の各 1。[IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) の「`--concurrency` との関係」、[IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「処理の順」)。これに S3 の最大 9(`aws.s3.bucket` 8、`aws.s3control.account_public_access_block` 1)が加わっても、同時の呼び出しは最大 28 で、手元の資源の点でも問題にならない
 - **見直し**: 実際のアカウントでスロットリングによる失敗の印が多い場合、またはバケットが多く時間が問題になる場合は、値を見直す(未決事項「組の中の並行数の実測による見直し(S3)」)。上限はサービスによらず共通の値のため、S3 だけ変えるには `CollectContext` の変更(共有のファイル)が要る
 
 ### 件数の見込みと所要時間
@@ -381,7 +392,6 @@ crates/yata-provider-aws/
 
 - 共有のファイルを変更しないため、1 つの PR にする: `src/collectors/s3/bucket.rs`、`src/collectors/s3control/account_public_access_block.rs`、`tests/golden/s3/bucket.json`、`tests/golden/s3control/account_public_access_block.json`(すべて新規)
 - 実装の途中で共通部分(`support/`、`context.rs` など)の変更が必要になったら、作業を止めて報告し、別の PR にする
-- 順序: 別の Issue(#39)で、[リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」に、一覧の操作の値へ出力の最上位の項目(`ListBuckets` の `Owner`)を加える扱いを反映し、その PR を先に main へ入れる。この設計のマージはそのあとにし、実装の PR はこの設計のマージの後に出す
 
 ### 依存
 
@@ -419,7 +429,8 @@ crates/yata-provider-aws/
 
 - **件数とページング**: `ListBuckets` を 2 ページ(1 ページ目が `ContinuationToken` を返す)で返し、全バケットがリソースになること(モックの件数 = リソースの件数)。複数のリージョン(`us-east-1`、`eu-west-1`、`ap-northeast-1` など)のバケットを含め、各リソースの `region` がそのバケットの `BucketRegion` であること
 - **既定のパラメーター**: `match_requests` で、`ListBuckets` の `MaxBuckets` が 10,000 で、`Prefix`・`BucketRegion` が無いこと。1 ページ目の規則は「`ContinuationToken` が無い」、2 ページ目の規則は「`ContinuationToken` が 1 ページ目の応答の値と等しい」で照合する(`RuleMode::MatchAny` で同じ操作の規則を見分けるため)。バケットごとの 3 つの操作は、`Bucket` が一覧のバケット名で、`ExpectedBucketOwner` が無いこと
-- **`Owner`**: 各バケットの `ListBuckets` の値に、そのページの `Owner` が入ること。`Owner` を返さないページの要素では `null` になること
+- **`ListBuckets` の値の形**: 各バケットの `ListBuckets` の値が `Buckets`・`Owner`・`Prefix` の 3 つのキーだけを持ち、`Buckets` がそのバケットの要素 1 つだけの配列で、`ContinuationToken` を含まないこと(期待するファイルでも固定する)
+- **ページごとの値**: 2 ページの応答で、1 ページ目は `Owner` を返して `Prefix` を返さず、2 ページ目は 1 ページ目と違う `Owner`(`ID` を変え、`DisplayName` を省く)と `Prefix` を返すようにし、各バケットにその要素を返したページの値が入ること。1 ページ目のバケットの `Prefix` が `null`、2 ページ目のバケットの `Owner.DisplayName` が `null` になること。別に、`Owner` を返さないページの要素で `"Owner": null` になること
 - **`GetBucketPolicy`**: HTTP の応答のモック(本文が JSON の文書)で、パースしたオブジェクトが `Policy` に入ること(SDK が本文を変えずに渡すことの確認を兼ねる)。JSON でない本文で、元の文字列のまま入ること。`NoSuchBucketPolicy` で `"GetBucketPolicy": null` になること(`then_error` の汎用のエラーと、S3 の XML のエラー応答 `<Error><Code>NoSuchBucketPolicy</Code>...</Error>`(HTTP 404)の両方で、SDK がコードを取り出せることを確かめる)。成功の応答で `Policy` が無い場合に `{"Policy": null}` になること
 - **`GetPublicAccessBlock`**: 4 項目が入り、返らない項目が `null` になること。`NoSuchPublicAccessBlockConfiguration` で `null`、成功の応答で設定が無い場合に `{"PublicAccessBlockConfiguration": null}` になること
 - **`GetBucketLogging`**: ログが有効なバケットで、`TargetGrants`(`Grantee` の `Type` と `Permission` の文字列を含む)と `TargetObjectKeyFormat`(`PartitionedPrefix` と `SimplePrefix` の `{}`)が入ること。無効なバケットで `{"LoggingEnabled": null}` になること。HTTP の応答のモック(XML)で `TargetBucket`・`TargetPrefix`・`Grantee` の `xsi:type` を省き、SDK が補った値(`""`、`"no value was set"`)がそのまま入ること(SDK の補い方が変わったら、このテストで検出する)
@@ -428,7 +439,7 @@ crates/yata-provider-aws/
 - **リージョンの選び方**: リージョンごとのクライアントを用意する関数を単体テストし、各バケットに渡すクライアントの `config().region()` がそのバケットの `BucketRegion` であること、同じリージョンのバケットでクライアントを共有することを確かめる。モックの規則は要求の入力だけで照合し、送り先のリージョンを見られないため、関数を分けて確かめる
 - **列挙の失敗**: `ListBuckets` の 1 ページ目・2 ページ目の失敗(`AccessDenied`、`SlowDown`、`InternalError`)で組全体の失敗になり、種類とメッセージがそのとおりであること
 - **値を変換できない要素**: `Name` の無い要素、`BucketRegion` の無い要素、形式の誤った `BucketRegion`(例: `"not a region"`)、整形できない `CreationDate` で組全体の失敗(`invalid_response`)になり、メッセージが上の「値を変換できない場合」の形であること。このとき、バケットごとの操作が呼ばれないこと(規則の `num_calls()`)
-- **0 件**: どのページも `Buckets` が空、または返さない場合に空の配列を返し、バケットごとの操作を呼ばないこと
+- **0 件**: どのページも `Buckets` が空、または返さない場合に空の配列を返し、バケットごとの操作を呼ばないこと。一部のページだけが `Buckets` を返さない場合は、ほかのページの要素だけがリソースになること
 - **並行**: 上限 1 と 8 の `CollectContext`(`with_fan_out_limit`)で、同じ構成情報になること
 - **接続できないリージョン**: `region_unavailable` への分類は `support/errors.rs` の判定の表のテストで確かめ、このコレクターでは確かめない。`aws-smithy-mocks` の規則が返せるのは出力・操作のエラー・HTTP の応答(`then_output` / `then_error` / `then_http_response` / `then_compute_response`)で、接続の失敗(`DispatchFailure`)は返せないため。失敗の印の種類がエラーの種類のまま入ることは、上の「失敗の印」のテストで確かめる
 
@@ -442,11 +453,10 @@ crates/yata-provider-aws/
 
 ## 既存の設計との差異
 
-この設計で、既存の設計書・全体設計と次の点が変わります。`docs/architecture/` と既存の設計書は、この Issue の PR では変更しません。全体設計の変更が要る行([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」)は、別の Issue(#39)で全体設計を先に更新して main へ入れ、この設計のマージはそのあとにします。
+この設計で、既存の設計書と次の点が変わります。全体設計(`docs/architecture/`)との差異はありません(`ListBuckets` の値の形は [ADR: 列挙の操作の値に出力の形を保つ](../adr/ADR-0039-Keep-Output-Shape-for-Listing-Operation-Values.ja.md) に従う)。既存の設計書は、この Issue の PR では変更しません。
 
 | ページ | 既存の記述 | この設計 |
 | --- | --- | --- |
-| [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」 | 一覧・説明の操作の値は、出力の配列の中のそのリソースの要素 | `ListBuckets` の値は、要素に、出力の最上位の `Owner`(一覧のバケットの所有者)を加えたもの。要素ごとに 1 対 1 で付随する出力の最上位の項目を、要素の値に加える扱いを全体設計に加える。全体設計の更新は別の Issue(#39)で行って先に main へ入れ、この設計のマージはそのあとにする |
 | [最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) の「S3 のバケット」 | バケットのリージョンに接続できない場合は、そのキーに失敗の印(`region_unavailable`) | 接続の失敗(DNS・接続)と `OptInRequired` は `region_unavailable`。無効なオプトインのリージョンで S3 が返すコードは確かめられていないため、既存の表に当たらないコードは `service` の失敗の印にする(未決事項「接続できないリージョンのエラーのコード」) |
 | [最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md) の「各コレクターの構成情報の細部」(S3 の分) | 各コレクターの機能設計書で決める | 上の「種別ごとの設計」。`null` にするエラーは Feature-0005 の表の 2 つのコードのまま、操作との組で判定する |
 | [AWS プロバイダの基盤](Feature-0007-AWS-Provider-Foundation.ja.md) の未決事項「`access_denied` などのコードの過不足」(S3 の分) | 各コレクターの Issue で確かめる | S3・S3 Control のコードで、表への追加は要らない(上の「エラーの種類の判定(S3 のコード)」) |
@@ -463,7 +473,7 @@ crates/yata-provider-aws/
 
 ## 参考資料
 
-- `ListBuckets`(ページング、`MaxBuckets` の範囲と既定のページの大きさ、ページングの無い呼び出しの制限、`BucketRegion`・`Prefix` の意味、`Owner`、`s3:ListAllMyBuckets`、ディレクトリバケットに対応しない): <https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html>
+- `ListBuckets`(出力の項目 `Buckets`・`Owner`・`ContinuationToken`・`Prefix`、ページング、`MaxBuckets` の範囲と既定のページの大きさ、ページングの無い呼び出しの制限、`BucketRegion`・`Prefix` の意味、`Owner`、`s3:ListAllMyBuckets`、ディレクトリバケットに対応しない): <https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html>
 - `Bucket`(`BucketArn` はディレクトリバケットのみ、`BucketRegion` は要求にパラメーターがある場合に返る、`CreationDate` が変わりうる): <https://docs.aws.amazon.com/AmazonS3/latest/API/API_Bucket.html>
 - `Owner`: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_Owner.html>
 - `GetBucketPolicy`(所有者のアカウントの要件、403 / 405、`s3:GetBucketPolicy`、応答の本文がポリシーの JSON): <https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html>
@@ -478,7 +488,7 @@ crates/yata-provider-aws/
 - S3 のアクション・リソースの種類・ARN の形式(Service Authorization Reference): <https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazons3.html>
 - ARN の形式: <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html>
 - AWS 管理ポリシー `SecurityAudit`: <https://docs.aws.amazon.com/aws-managed-policy/latest/reference/SecurityAudit.html>
-- SDK の型(`aws-sdk-s3` 1.152.0 の `Bucket`、`ListBucketsOutput`、`LoggingEnabled`、`Grantee`、`TargetGrant`、`PublicAccessBlockConfiguration`、ページネーター): <https://docs.rs/aws-sdk-s3/1.152.0/aws_sdk_s3/types/index.html>、<https://docs.rs/aws-sdk-s3/1.152.0/aws_sdk_s3/operation/list_buckets/paginator/struct.ListBucketsPaginator.html>
+- SDK の型(`aws-sdk-s3` 1.152.0 の `Bucket`、`ListBucketsOutput`(`buckets`・`owner`・`continuation_token`・`prefix`)、`LoggingEnabled`、`Grantee`、`TargetGrant`、`PublicAccessBlockConfiguration`、ページネーター): <https://docs.rs/aws-sdk-s3/1.152.0/aws_sdk_s3/types/index.html>、<https://docs.rs/aws-sdk-s3/1.152.0/aws_sdk_s3/operation/list_buckets/paginator/struct.ListBucketsPaginator.html>
 - SDK の型(`aws-sdk-s3control` 1.133.0 の `PublicAccessBlockConfiguration`): <https://docs.rs/aws-sdk-s3control/1.133.0/aws_sdk_s3control/types/struct.PublicAccessBlockConfiguration.html>
 - 既定の再試行の分割の名前(`aws-sdk-s3` の `src/config.rs`): <https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/s3/src/config.rs>
 - S3 Control の `GetPublicAccessBlock` の生成コード(`RequiresAccountId`、サービス名 `S3 Control`): <https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/s3control/src/operation/get_public_access_block.rs>
