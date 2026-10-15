@@ -2,6 +2,34 @@
   {
     "account": "aws-123456789012",
     "configuration": {
+      "GetCredentialReport": {
+        "Content": {
+          "access_key_1_active": "TRUE",
+          "access_key_1_last_rotated": "2026-01-01T00:00:00+00:00",
+          "access_key_1_last_used_date": "N/A",
+          "access_key_1_last_used_region": "N/A",
+          "access_key_1_last_used_service": "N/A",
+          "access_key_2_active": "FALSE",
+          "access_key_2_last_rotated": "N/A",
+          "access_key_2_last_used_date": "N/A",
+          "access_key_2_last_used_region": "N/A",
+          "access_key_2_last_used_service": "N/A",
+          "arn": "arn:aws:iam::123456789012:user/alice",
+          "cert_1_active": "FALSE",
+          "cert_1_last_rotated": "N/A",
+          "cert_2_active": "FALSE",
+          "cert_2_last_rotated": "N/A",
+          "mfa_active": "FALSE",
+          "password_enabled": "TRUE",
+          "password_last_changed": "2026-01-01T00:00:00+00:00",
+          "password_last_used": "no_information",
+          "password_next_rotation": "N/A",
+          "user": "alice",
+          "user_creation_time": "2026-01-01T00:00:00+00:00"
+        },
+        "GeneratedTime": "2026-01-01T00:00:00Z",
+        "ReportFormat": "text/csv"
+      },
       "ListAttachedUserPolicies": {
         "AttachedPolicies": [
           {
@@ -52,6 +80,12 @@
   {
     "account": "aws-123456789012",
     "configuration": {
+      "GetCredentialReport": {
+        "yata_error": {
+          "kind": "invalid_response",
+          "message": "invalid response when calling GetCredentialReport (MissingUserRow)"
+        }
+      },
       "ListAttachedUserPolicies": {
         "AttachedPolicies": null
       },
@@ -82,6 +116,34 @@
   {
     "account": "aws-123456789012",
     "configuration": {
+      "GetCredentialReport": {
+        "Content": {
+          "access_key_1_active": "TRUE",
+          "access_key_1_last_rotated": "2026-01-01T00:00:00+00:00",
+          "access_key_1_last_used_date": "N/A",
+          "access_key_1_last_used_region": "N/A",
+          "access_key_1_last_used_service": "N/A",
+          "access_key_2_active": "FALSE",
+          "access_key_2_last_rotated": "N/A",
+          "access_key_2_last_used_date": "N/A",
+          "access_key_2_last_used_region": "N/A",
+          "access_key_2_last_used_service": "N/A",
+          "arn": "arn:aws:iam::123456789012:user/team/bob",
+          "cert_1_active": "FALSE",
+          "cert_1_last_rotated": "N/A",
+          "cert_2_active": "FALSE",
+          "cert_2_last_rotated": "N/A",
+          "mfa_active": "FALSE",
+          "password_enabled": "TRUE",
+          "password_last_changed": "2026-01-01T00:00:00+00:00",
+          "password_last_used": "no_information",
+          "password_next_rotation": "N/A",
+          "user": "bob",
+          "user_creation_time": "2026-01-01T00:00:00+00:00"
+        },
+        "GeneratedTime": "2026-01-01T00:00:00Z",
+        "ReportFormat": "text/csv"
+      },
       "ListAttachedUserPolicies": {
         "AttachedPolicies": []
       },
