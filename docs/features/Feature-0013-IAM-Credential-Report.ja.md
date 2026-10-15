@@ -398,12 +398,12 @@ crates/yata-provider-aws/
 
 ## 既存の設計との差異
 
-この設計で、既存の設計書・全体設計と次の点が変わります。機能設計書([最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md)、[IAM のコレクター](Feature-0012-IAM-Collectors.ja.md))は、この Issue の PR で合わせて直します。`docs/architecture/` は、この Issue の PR では変更せず、全体設計の後続 Issue(番号未定)の別の PR で反映します(未決事項「全体設計への反映」)。
+この設計で、既存の設計書・全体設計と次の点が変わります。機能設計書([最初のルール群の範囲](Feature-0005-Initial-Rule-Set-Scope.ja.md)、[IAM のコレクター](Feature-0012-IAM-Collectors.ja.md))は、この Issue の PR で合わせて直します。`docs/architecture/` は、この Issue の PR では変更せず、全体設計の Issue #41の別の PR で反映します(未決事項「全体設計への反映」)。
 
 | ページ | 既存の記述 | この設計 | 反映 |
 | --- | --- | --- | --- |
-| [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」 | 最初のルール群の範囲と Diagram-0005 の値の形(`ReportFormat` を含まない)は、認証情報レポートのコレクターの機能設計書で、このページの形に合わせる | 最初のルール群の範囲は `{GeneratedTime, ReportFormat, Content}` に直す。Diagram-0005 は図の作業で直す。リソースモデルのこの文は、両方を直した後には事実と合わないため消す | 最初のルール群の範囲はこの Issue の PR。Diagram-0005 は図の作業。リソースモデルの文の削除は全体設計の後続 Issue(番号未定) |
-| [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「コレクターの方針」 | 「すべて入れる」に対する例外は、`aws.account.account` とルートユーザーの行だけ。対象の操作の範囲は書かれていない | 「すべて入れる」の対象はリソースの情報を取る操作の出力で、別の操作の前提として呼ぶ手順の操作(`GenerateCredentialReport` など)の出力は対象外(例外ではない)。最初のルール群の範囲の「コレクターの方針」に書く | 最初のルール群の範囲はこの Issue の PR。リソースモデルへの追記は全体設計の後続 Issue(番号未定) |
+| [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「格納の形」 | 最初のルール群の範囲と Diagram-0005 の値の形(`ReportFormat` を含まない)は、認証情報レポートのコレクターの機能設計書で、このページの形に合わせる | 最初のルール群の範囲は `{GeneratedTime, ReportFormat, Content}` に直す。Diagram-0005 は図の作業で直す。リソースモデルのこの文は、両方を直した後には事実と合わないため消す | 最初のルール群の範囲はこの Issue の PR。Diagram-0005 は図の作業。リソースモデルの文の削除は全体設計の Issue #41 |
+| [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の「コレクターの方針」 | 「すべて入れる」に対する例外は、`aws.account.account` とルートユーザーの行だけ。対象の操作の範囲は書かれていない | 「すべて入れる」の対象はリソースの情報を取る操作の出力で、別の操作の前提として呼ぶ手順の操作(`GenerateCredentialReport` など)の出力は対象外(例外ではない)。最初のルール群の範囲の「コレクターの方針」に書く | 最初のルール群の範囲はこの Issue の PR。リソースモデルへの追記は全体設計の Issue #41 |
 | [IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) の「`aws.iam.user`」 | `required_permissions` は 3 つ(認証情報レポートの Issue で 2 つ足す)。失敗の印は `ListAttachedUserPolicies`、`ListUserPolicies`。処理の順は 3 段 | `required_permissions` は 5 つ。失敗の印に `GetCredentialReport` を加える。処理の順は上の「処理の順」の 5 段(ユーザーごとの取得とレポートの取得を並行に進める) | この Issue の PR で、IAM のコレクターの該当の記述をこの設計への参照に直す |
 | [IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) の「`--concurrency` との関係」 | IAM の 4 つの組が同時に動くと、IAM への同時の呼び出しは最大 18 | レポートの呼び出しの 1 を加えて最大 19 | この Issue の PR |
 | [IAM のコレクター](Feature-0012-IAM-Collectors.ja.md) の「構成」 | 1 つのコレクターだけが使う処理は、そのコレクターのファイルに置く(`Document` の URL デコードは `policy.rs`) | CSV の解析は今は `user.rs` だけが使うが、`support/csv.rs` に置く。例外にする基準: (1) AWS のサービスに依存しない汎用の処理で、(2) コレクターの責務(リソースの収集)と別の形式の処理であり、(3) 関数とテストの量が多く、コレクターのファイルに置くと 1 ファイル 1 責務が崩れるもの。3 つをすべて満たす場合は、使うコレクターが 1 つでも `support/` に置いてよい。`Document` の URL デコードは (1)(2) を満たすが、処理が 3 段で小さく (3) を満たさないため `policy.rs` のままとする | この設計で決める(例外の基準はこの表に書き、IAM のコレクターの「構成」の規則からこの表へ参照を足す) |
@@ -414,7 +414,7 @@ crates/yata-provider-aws/
 
 | 項目 | 内容 | 決める時期 |
 | --- | --- | --- |
-| 全体設計への反映 | [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) に、(1) 「すべて入れる」の対象はリソースの情報を取る操作の出力で、前提の手順の操作の出力は対象外であることを加え、(2) 「格納の形」の「最初のルール群の範囲と Diagram-0005 の値の形(`ReportFormat` を含まない)は…合わせる」の文を消す(上の「既存の設計との差異」) | 全体設計の後続 Issue(番号未定)の別の PR。(2) は Diagram-0005 を直した後 |
+| 全体設計への反映 | [リソースモデル](../architecture/Architecture-Resource-Model.ja.md) に、(1) 「すべて入れる」の対象はリソースの情報を取る操作の出力で、前提の手順の操作の出力は対象外であることを加え、(2) 「格納の形」の「最初のルール群の範囲と Diagram-0005 の値の形(`ReportFormat` を含まない)は…合わせる」の文を消す(上の「既存の設計との差異」) | 全体設計の Issue #41の別の PR。(2) は Diagram-0005 を直した後 |
 | 待ち方の定数の実測による見直し | 最初の間隔 1 秒、上限 8 秒、合計 120 秒は、AWS が生成の時間を公開していないことと、ほかの OSS の待ち方からの判断で、実測していない。ユーザーの多いアカウントで時間切れが起こるか、使い回しが無いときに何回の呼び出しで `COMPLETE` になるかを確かめ、値を見直すか。実 AWS での確認にはメンテナーの確認が要る | 最初のリリースの前の実環境での確認、または時間切れの報告があった時点 |
 | 待ち方の定数を利用者が変える手段 | 生成が 120 秒を超えるアカウントのために、CLI のオプション・環境変数で上限を変えられるようにするか | 時間切れの報告があった時点(CLI の変更になるため、全体設計の Issue として) |
 | `LimitExceeded` の扱い | `GenerateCredentialReport` の `LimitExceeded` がどういう場合に返るか(生成の頻度の制限か、ほかの制限か)は確かめられなかった。生成の頻度の制限なら、4 時間以内のレポートが残っている見込みがあり、`GetCredentialReport` を試す扱いも考えられる。今は失敗の印(`service`)にする | 実環境で `LimitExceeded` を確かめられた時点 |
