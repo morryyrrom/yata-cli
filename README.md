@@ -6,6 +6,12 @@ The initial focus is CSPM (Cloud Security Posture Management): a CLI that scans 
 
 > **Status:** Early development. Not ready for production use.
 
+## Related resources
+
+- Policies (rules) are not included in `yata`. The official AWS policy set is distributed from [yata-rules](https://github.com/morryyrrom/yata-rules), and `yata` loads it at runtime from the directory given by `--policy-dir` or `YATA_POLICY_DIR`.
+- Design documents are in [docs/](docs/), starting with the [architecture overview](docs/architecture/Architecture-Overview.ja.md) (Japanese; English versions are not written yet).
+- To report a security vulnerability, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 Licensed under either of
