@@ -27,7 +27,7 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 
 ## スコープ外
 
-- 認証情報レポート(`GenerateCredentialReport`、`GetCredentialReport`)。別の Issue で `aws.iam.user` に `GetCredentialReport` のキーを加える。この設計では、そのキーを足せる形にしておく(下の「`aws.iam.user`」の「認証情報レポートを加えるときの形」)
+- 認証情報レポート(`GenerateCredentialReport`、`GetCredentialReport`)。`aws.iam.user` の `GetCredentialReport` のキーは [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) で加える。この設計では、そのキーを足せる形にしておく(下の「`aws.iam.user`」の「認証情報レポートを加えるときの形」)
 - ルール本体(ポリシーのリポジトリ)
 - ルートの `Cargo.toml`、`crates/yata-provider-aws/Cargo.toml`、`Cargo.lock` の変更。必要な依存はすべて基盤の Issue で入っている(下の「依存」)
 - `docs/architecture/` の変更。この設計と全体設計・既存の設計書の差は、下の「既存の設計との差異」にまとめる
@@ -184,14 +184,14 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 | ファイル | `collectors/iam/user.rs` |
 | スコープ | global |
 | 操作 | `ListUsers`(列挙)、`ListAttachedUserPolicies`・`ListUserPolicies`(ユーザーごと。`UserName` は必須の識別子) |
-| `required_permissions` | `["iam:ListUsers", "iam:ListAttachedUserPolicies", "iam:ListUserPolicies"]`(認証情報レポートの Issue で 2 つ足す) |
+| `required_permissions` | `["iam:ListUsers", "iam:ListAttachedUserPolicies", "iam:ListUserPolicies"]`。認証情報レポートの 2 つ(`iam:GenerateCredentialReport`、`iam:GetCredentialReport`)を加えた 5 つの一覧は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「構成」 |
 | リソースの件数 | `ListUsers` が返したユーザーの数(全ページ) |
 | `id` | ユーザーの ARN(`ListUsers` の `Arn`。例: `arn:aws:iam::123456789012:user/example-user`) |
 | `name` | `UserName` |
 | `tags` | 常に `{}`(タグを取得しない種別。`ListUsers` は API の仕様で `Tags` を返さない。下の注記) |
 | `null` にするエラー | なし |
 | 組全体の失敗 | `ListUsers` の失敗(どのページでも) |
-| 失敗の印 | `ListAttachedUserPolicies`、`ListUserPolicies` の失敗(そのユーザーのそのキーだけ) |
+| 失敗の印 | `ListAttachedUserPolicies`、`ListUserPolicies` の失敗(そのユーザーのそのキーだけ)。`GetCredentialReport` のキーの失敗の印は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「失敗の印」 |
 
 構成情報の形:
 
@@ -235,10 +235,12 @@ IAM の 4 つのリソース種別(`aws.iam.account_summary`、`aws.iam.password
 2. ユーザーごとに、`ListAttachedUserPolicies` → `ListUserPolicies` の順に呼ぶ 1 つの仕事を作り、上限付きで並行に実行する(下の「組の中の並行の呼び出し」)。2 つの操作は、それぞれ独立に成功・失敗を記録する(片方の失敗で、もう片方を呼ばないことはしない)
 3. ユーザーごとに `Resource` を組み立てる
 
+認証情報レポートを加えた後の処理の順(ユーザーが 0 人ならレポートの操作を呼ばない、手順 2 とレポートの取得を並行に進める、など)は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「処理の順」です。
+
 **認証情報レポートを加えるときの形**
 
 - 構成情報は操作名をキーにしたオブジェクトなので、認証情報レポートの Issue は、手順 3 の後に `GetCredentialReport` のキーを各ユーザーに足すだけでよい。レポートの行とユーザーの対応づけは、`ListUsers` の `Arn`(= `id`)で行う
-- 手順 2 の並行の仕事は、ユーザーごとの 2 つのキーだけを返す形にし、`Resource` の組み立て(手順 3)と分ける。レポートの取得をどこで行うか(手順 2 と並行に行うかなど)は、その Issue で決める
+- 手順 2 の並行の仕事は、ユーザーごとの 2 つのキーだけを返す形にし、`Resource` の組み立て(手順 3)と分ける。レポートの取得は手順 2 と並行に行う([IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「処理の順」)
 - `required_permissions` に `iam:GenerateCredentialReport` と `iam:GetCredentialReport` を足す。キーの追加は項目の追加なので、構成情報の互換性を壊さない
 
 ### `aws.iam.policy`
@@ -361,7 +363,7 @@ where
 
 - `--concurrency` は、同時に実行する組(タスク)の数の上限で、[AWS プロバイダの基盤](Feature-0007-AWS-Provider-Foundation.ja.md) のセマフォの許可で数える。組の中の仕事は、この許可を取らない
 - このため行き詰まりは起こらない: 組のタスクは許可を 1 つ持ったまま組の中の仕事の終わりを待つが、組の中の仕事は許可を待たず、ほかのどの待ちにも依存しない
-- 同時に送る API の呼び出しの数の上限は、「実行中の組のうち並行に呼ばない組の数 + 並行に呼ぶ組の数 × 8」になる。IAM の 4 つの組が同時に動くと、IAM への同時の呼び出しは最大 1 + 1 + 8 + 8 = 18
+- 同時に送る API の呼び出しの数の上限は、「実行中の組のうち並行に呼ばない組の数 + 並行に呼ぶ組の数 × 8」になる。IAM の 4 つの組が同時に動くと、IAM への同時の呼び出しは最大 1 + 1 + 8 + 8 = 18。認証情報レポートの取得を加えると、`aws.iam.user` の組でレポートの呼び出しの 1 が加わり、最大 19 になる([IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「処理の順」)
 - `--concurrency` を小さくしても、組の中の並行数は変わらない(`--concurrency 1` でも、`aws.iam.policy` の組は最大 8 の呼び出しを同時に送る)。利用者が組の中の並行数を変える手段は設けない(未決事項「組の中の並行数を利用者が変える手段」)
 
 図: [並行の構造](../diagrams/Diagram-0012-IAM-Concurrency-Structure.md)
@@ -370,7 +372,7 @@ where
 
 - **時間**: 1 回の呼び出しの往復を 100〜300 ms(端末から `us-east-1` までの距離による。実測ではなく見込み)とすると、ポリシーが 1,500 件のとき、`GetPolicyVersion` を順に呼ぶと 150〜450 秒、8 並行で 19〜56 秒、16 並行で 9〜28 秒。8 で、`aws.iam.policy` の組を 1 分前後に収め、ほかの組(リージョンの組 170 前後)の収集とおおむね同じ時間に終えられる
 - **IAM の制限**: IAM の API のリクエストの制限は公開されていない。IAM はグローバルなサービスで、制限はアカウントの単位で掛かると見られ、同じアカウントのほかの利用者(デプロイのパイプラインなど)と枠を分け合う。並行数を増やすほど、スロットリングに当たる見込みと、ほかの利用者への影響が大きくなる。16 にしても時間の短縮は半分に満たない(往復の時間の見込みの幅の方が大きい)ため、控えめな 8 にする
-- **並行に呼ぶ組が 2 つあること**: `aws.iam.user` と `aws.iam.policy` が同時に動くため、IAM への同時の呼び出しは最大 18 になる。基盤の `--concurrency` の既定値(16)と同じ程度の同時の接続数で、手元の資源の点でも問題にならない
+- **並行に呼ぶ組が 2 つあること**: `aws.iam.user` と `aws.iam.policy` が同時に動くため、IAM への同時の呼び出しは最大 18(認証情報レポートを加えた後は 19)になる。基盤の `--concurrency` の既定値(16)と同じ程度の同時の接続数で、手元の資源の点でも問題にならない
 - **見直し**: 実際のアカウントでスロットリングによる失敗の印が多い場合や、時間が問題になる場合は、値を見直す(未決事項「組の中の並行数の実測による見直し」)
 
 ### 件数の見込みと所要時間
@@ -460,7 +462,7 @@ crates/yata-provider-aws/
 
 - 4 つのコレクターは build.rs が `src/collectors/iam/*.rs` から検出し、`aws.iam.<resource>` の種別になる。一覧・`mod` の宣言・`Cargo.toml` に追記しない
 - 各コレクターのファイルは `pub(crate) fn collector() -> Box<dyn Collector>` を定義する
-- `src/collectors/iam/` には、コレクターではない `.rs` を置けない(検出の規則で、置いた `.rs` はすべてコレクターとして扱われる)。このため、IAM の 2 つ以上のコレクターが使う処理(日時の変換など)は `support/` に置く。1 つのコレクターだけが使う処理(`Document` のデコード、ユーザーごとの 2 つの操作の組み立て)は、そのコレクターのファイルに置く
+- `src/collectors/iam/` には、コレクターではない `.rs` を置けない(検出の規則で、置いた `.rs` はすべてコレクターとして扱われる)。このため、IAM の 2 つ以上のコレクターが使う処理(日時の変換など)は `support/` に置く。1 つのコレクターだけが使う処理(`Document` のデコード、ユーザーごとの 2 つの操作の組み立て)は、そのコレクターのファイルに置く。1 つのコレクターだけが使う処理でも `support/` に置く例外の基準は、[IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「既存の設計との差異」の「構成」の行を参照する
 - **変換の補助**([リソースモデル](../architecture/Architecture-Resource-Model.ja.md) の未決事項)は、マクロではなく、`support/convert.rs` の小さな関数とする。SDK の構造体から JSON のオブジェクトを作る部分は、各コレクターが `serde_json::json!` で項目を明示して書く。項目を明示することで、機能設計書の項目の一覧とコードレビューで「全項目を入れたか」を照らし合わせやすくするため
   - `convert.rs` の関数は SDK のサービスに依存しない形にする(日時の型は SDK のクレートの再エクスポート(例: `aws_sdk_sts::primitives::DateTime`。`errors.rs` が `aws_sdk_sts::error` を使うのと同じ形)で名指しする。どの SDK のクレートの再エクスポートも同じ `aws_smithy_types::DateTime` なので、どのサービスのコレクターからも同じ関数を使える)
 - `support/errors.rs` には、`CollectError` から失敗の印の値を作る関数(例: `CollectError::to_failure_mark()`)を加え、既存の `failure_mark` もこれを使う形にする。`invalid_response` の失敗の印(SDK のエラーではないもの)を作るため
@@ -498,6 +500,7 @@ crates/yata-provider-aws/
 | `aws.iam.policy` | `GetPolicyVersion` | ポリシーごと | `iam:GetPolicyVersion` |
 
 - どれも `Get` / `List` で始まる読み取りの操作で、読み取り専用ガードの接頭辞の規則で許可される。拒否リスト・例外リストの変更は要らない
+- 認証情報レポートの操作(`GenerateCredentialReport`、`GetCredentialReport`)は [IAM の認証情報レポートの収集](Feature-0013-IAM-Credential-Report.ja.md) の「使う AWS API と IAM 権限」
 - 各コレクターの `required_permissions` は上の表の権限で、基盤の既存のテスト(`required_permissions` の形、拒否リストの権限を含まないこと)の対象に自動でなる
 - AWS 管理ポリシー `SecurityAudit` は、これらの権限をすべて含む
 
