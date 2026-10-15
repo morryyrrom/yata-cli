@@ -66,7 +66,7 @@ AWS SDK のサービスのクレートは、[最初のルール群の範囲](../
 | `toml` | マニフェストを JSON にし、既存の `serde_json` で読むため |
 | `serde-sarif` | 必要な SARIF の項目は少なく、serde の構造体を自分で書けば足りるため。出力の形を自分で管理できる。必要になれば再検討する(ライセンスは MIT) |
 | `insta` | 出力の比較は、期待するファイルと比べる簡単なテストで足りるため |
-| `directories` / `dirs` | ポリシーのディレクトリの既定の場所を設けないため |
+| `directories` / `dirs` | ポリシーのディレクトリの既定の場所を設けないため(理由は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「`yata` からの指定」) |
 
 ## 未決事項
 

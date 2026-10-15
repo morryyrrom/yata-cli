@@ -242,7 +242,7 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 
 `--policy-dir <DIR>`(複数指定可)→ 環境変数 `YATA_POLICY_DIR`(OS のパスの区切り文字で複数指定可)の順に決めます。オプションと環境変数の両方があれば、オプションだけを使います(混ぜない)。既定の場所は設けず、どちらも無ければ終了コード 2 にします。優先度の規則は [CLI インターフェース](Architecture-CLI-Interface.ja.md) の「オプションの優先度」で定めます。
 
-`yata` はポリシーを取得・更新しません(ダウンロードのコマンドも設けません)。取得・更新は利用者が、ポリシーのリポジトリの配布物(リリースのアーカイブ、git clone)で行います。`yata` は取得したポリシーの署名・出所を検証しません。
+`yata` はポリシーを取得・更新しません(ダウンロードのコマンドも設けません)。取得・更新は利用者が、ポリシーのリポジトリの配布物(リリースのアーカイブ、git clone)で行います。`yata` は取得したポリシーの署名・出所を検証しません。配布の方法と改ざんの確認の手段は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「利用者の取得と指定」「改ざんの確認」で定めます。
 
 ### マニフェスト
 
@@ -261,8 +261,8 @@ message := sprintf("Bucket %s does not block public ACLs", [input.id]) if {
 | --- | --- | --- |
 | `format_version` | 必須 | ポリシーの形式のバージョン(整数)。ディレクトリの構成、ルールの書式(`metadata` / `fail` / `message` / `reason`)、フィクスチャの形式、`input` / `data` の形のいずれかに互換性の無い変更をしたときに上げる |
 | `name` | 必須 | ポリシーのセットの名前。名前の文字の規則(`[a-z][a-z0-9_]*`、予約語を除く)に従う。ルール ID とパッケージ名の先頭になる。ログとレポートに出す |
-| `version` | 必須 | ポリシーのセットのバージョン。SemVer に従う `x.y.z`(プレリリースの部分は使えない)。ルール ID には含めない。ログとレポートに出す |
-| `min_yata_version` | 必須 | このポリシーのセットに必要な `yata` の最低バージョン(`x.y.z`)。新しいリソース種別を使うルールを足したときなどに上げる |
+| `version` | 必須 | ポリシーのセットのバージョン。SemVer に従う `x.y.z`(プレリリースの部分は使えない)。上げ方は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「バージョンの上げ方」。ルール ID には含めない。ログとレポートに出す |
+| `min_yata_version` | 必須 | このポリシーのセットに必要な `yata` の最低バージョン(`x.y.z`)。新しいリソース種別を使うルールを足したときなどに上げる(上げる時期は [ããªã·ã¼ã®ãªãã¸ããªã®æ§æã¨éå¸](../features/Feature-0009-Policy-Repository-Layout-and-Distribution.ja.md) の「`min_yata_version` と `yata` のリリースの関係」) |
 
 ポリシーのディレクトリを複数指定した場合は、ディレクトリごとにマニフェストが必要で、ディレクトリごとに 1 つずつ検証します。1 つでも合わなければ終了コード 2 です。読み込んだマニフェストの `name` / `version` / `format_version` は、ディレクトリごとに 1 要素として `ScanReport.policies` に入れます([出力形式](Architecture-Output-Formats.ja.md))。
 
