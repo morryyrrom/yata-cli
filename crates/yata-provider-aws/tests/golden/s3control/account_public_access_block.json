@@ -1,0 +1,19 @@
+[
+  {
+    "account": "aws-123456789012",
+    "configuration": {
+      "GetPublicAccessBlock": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": false
+        }
+      }
+    },
+    "id": "aws.s3control.account_public_access_block:123456789012:global",
+    "region": "global",
+    "tags": {},
+    "type": "aws.s3control.account_public_access_block"
+  }
+]
